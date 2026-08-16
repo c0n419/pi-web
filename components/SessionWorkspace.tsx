@@ -198,10 +198,10 @@ export function SessionWorkspace({
         onSwapPanes?.(data.paneId, targetPaneId);
       } else if (data.type === "pi-session" && (data.sessionId || data.session?.id)) {
         const sessionId = data.sessionId || data.session?.id;
-        if (sessionId && onSelectSessionIdForPane) {
-          onSelectSessionIdForPane(targetPaneId, sessionId);
-        } else if (data.session && onSelectSessionForPane) {
+        if (data.session && onSelectSessionForPane) {
           onSelectSessionForPane(targetPaneId, data.session);
+        } else if (sessionId && onSelectSessionIdForPane) {
+          onSelectSessionIdForPane(targetPaneId, sessionId);
         }
       }
     } catch {
@@ -490,6 +490,30 @@ export function SessionWorkspace({
               onDragLeave={() => handleDragLeave(false)}
               onDrop={(e) => handleDrop(e, pane.id)}
             >
+              {isDragOver && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 99,
+                    background: "color-mix(in srgb, var(--accent) 25%, rgba(0,0,0,0.5))",
+                    backdropFilter: "blur(2px)",
+                    border: "2px dashed var(--accent)",
+                    borderRadius: 6,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    pointerEvents: "none",
+                  }}
+                >
+                  <div style={{ fontSize: 24, marginBottom: 6 }}>📂</div>
+                  <div>{t("panes.dropSessionHint")}</div>
+                </div>
+              )}
               {(pane.session || effectiveCwd) ? (
                 <ChatWindow
                   key={`${pane.id}:${pane.revision}`}

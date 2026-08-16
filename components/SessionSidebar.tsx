@@ -2287,6 +2287,7 @@ function SessionItem({
         e.dataTransfer.setData("text/plain", JSON.stringify({
           type: "pi-session",
           sessionId: session.id,
+          session,
         }));
         e.dataTransfer.effectAllowed = "copy";
       }}

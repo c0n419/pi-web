@@ -95,6 +95,7 @@ export const zhCNLocale: LocalePlugin = {
     "panes.editLabel": "编辑标签",
     "panes.labelPlaceholder": "自定义标签 (如 Backend)",
     "panes.dragHint": "拖拽标签页重新排序或交换面板",
+    "panes.dropSessionHint": "释放会话在此面板中打开",
     "files.hidePanel": "隐藏文件面板",
     "files.showPanel": "显示文件面板",
     "files.noneOpen": "没有打开的文件",

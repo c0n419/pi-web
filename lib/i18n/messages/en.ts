@@ -95,6 +95,7 @@ export const enLocale: LocalePlugin = {
     "panes.editLabel": "Edit label",
     "panes.labelPlaceholder": "Custom label (e.g. Backend)",
     "panes.dragHint": "Drag tab to reorder or swap panes",
+    "panes.dropSessionHint": "Drop session here to open in this pane",
     "files.hidePanel": "Hide file panel",
     "files.showPanel": "Show file panel",
     "files.noneOpen": "No file open",

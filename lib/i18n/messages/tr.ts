@@ -95,6 +95,7 @@ export const trLocale: LocalePlugin = {
     "panes.editLabel": "Etiketi düzenle",
     "panes.labelPlaceholder": "Özel etiket (örn. Backend)",
     "panes.dragHint": "Panellerin yerini değiştirmek için sekteyi sürükleyin",
+    "panes.dropSessionHint": "Oturumu bu pencerede açmak için buraya bırakın",
     "files.hidePanel": "Dosya panelini gizle",
     "files.showPanel": "Dosya panelini göster",
     "files.noneOpen": "Açık dosya yok",
