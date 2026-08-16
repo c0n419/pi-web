@@ -162,6 +162,8 @@ export const enLocale: LocalePlugin = {
     "sidebar.messagesCount": "{count} msgs",
     "sidebar.worktreePath": "Worktree: {path}",
     "sidebar.removeWorktreeTitle": "Remove worktree checkout {path}; the branch is kept",
+    "sidebar.addProject": "Add Project",
+    "sidebar.removeProjectTitle": "Remove project from sidebar",
     "files.modified": "Modified",
     "files.added": "Added",
     "files.deleted": "Deleted",

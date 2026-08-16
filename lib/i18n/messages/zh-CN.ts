@@ -162,6 +162,8 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.messagesCount": "{count} 条消息",
     "sidebar.worktreePath": "Worktree：{path}",
     "sidebar.removeWorktreeTitle": "移除 worktree checkout {path}；保留分支",
+    "sidebar.addProject": "添加项目",
+    "sidebar.removeProjectTitle": "从侧边栏移除项目",
     "files.modified": "已修改",
     "files.added": "已添加",
     "files.deleted": "已删除",

@@ -38,7 +38,7 @@ export function projectColor(root: string): string {
   return PROJECT_COLOR_PALETTE[(hash >>> 0) % PROJECT_COLOR_PALETTE.length];
 }
 
-export function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
+export function buildSessionTree(sessions: SessionInfo[], runningSessionIds?: ReadonlySet<string>): SessionTreeNode[] {
   const byId = new Map<string, SessionTreeNode>();
   for (const session of sessions) {
     byId.set(session.id, { session, children: [] });
@@ -69,7 +69,12 @@ export function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
   }
 
   const sort = (nodes: SessionTreeNode[]) => {
-    nodes.sort((a, b) => b.session.modified.localeCompare(a.session.modified));
+    nodes.sort((a, b) => {
+      const aRunning = runningSessionIds?.has(a.session.id) ? 1 : 0;
+      const bRunning = runningSessionIds?.has(b.session.id) ? 1 : 0;
+      if (aRunning !== bRunning) return bRunning - aRunning;
+      return b.session.modified.localeCompare(a.session.modified);
+    });
     nodes.forEach((node) => sort(node.children));
   };
   sort(roots);
@@ -95,7 +100,7 @@ export function groupSessionsByProject(
     .map(([root, projectSessions]) => ({
       root,
       sessions: projectSessions,
-      tree: buildSessionTree(projectSessions),
+      tree: buildSessionTree(projectSessions, runningSessionIds),
       latestModified: projectSessions.reduce(
         (latest, session) => session.modified > latest ? session.modified : latest,
         "",
@@ -104,29 +109,21 @@ export function groupSessionsByProject(
       unreadCount: projectSessions.filter((session) => unreadSessionIds.has(session.id)).length,
     }));
 
-  if (customOrder && customOrder.length > 0) {
-    const orderMap = new Map<string, number>();
-    customOrder.forEach((root, idx) => orderMap.set(root, idx));
-    return groups.sort((a, b) => {
+  return groups.sort((a, b) => {
+    const aActive = a.runningCount > 0 ? 1 : 0;
+    const bActive = b.runningCount > 0 ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+
+    if (customOrder && customOrder.length > 0) {
+      const orderMap = new Map<string, number>();
+      customOrder.forEach((root, idx) => orderMap.set(root, idx));
       const idxA = orderMap.get(a.root);
       const idxB = orderMap.get(b.root);
       if (idxA !== undefined && idxB !== undefined) return idxA - idxB;
       if (idxA !== undefined) return -1;
       if (idxB !== undefined) return 1;
-      const aActive = a.runningCount > 0 ? 1 : 0;
-      const bActive = b.runningCount > 0 ? 1 : 0;
-      if (aActive !== bActive) return bActive - aActive;
-      const aUnread = a.unreadCount > 0 ? 1 : 0;
-      const bUnread = b.unreadCount > 0 ? 1 : 0;
-      if (aUnread !== bUnread) return bUnread - aUnread;
-      return b.latestModified.localeCompare(a.latestModified);
-    });
-  }
+    }
 
-  return groups.sort((a, b) => {
-    const aActive = a.runningCount > 0 ? 1 : 0;
-    const bActive = b.runningCount > 0 ? 1 : 0;
-    if (aActive !== bActive) return bActive - aActive;
     const aUnread = a.unreadCount > 0 ? 1 : 0;
     const bUnread = b.unreadCount > 0 ? 1 : 0;
     if (aUnread !== bUnread) return bUnread - aUnread;

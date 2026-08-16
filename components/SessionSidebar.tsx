@@ -714,7 +714,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         setCustomPathError(data.error ?? `HTTP ${res.status}`);
         return;
       }
-      setSelectedCwd(data.cwd ?? path);
+      const targetCwd = data.cwd ?? path;
+      unhideProject(targetCwd);
+      setSelectedCwd(targetCwd);
       setCustomPathOpen(false);
       setCustomPathValue("");
       setDropdownOpen(false);
@@ -914,9 +916,51 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, []);
 
+  const [hiddenProjectRoots, setHiddenProjectRoots] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = localStorage.getItem("pi-web:hidden-project-roots");
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const hideProject = useCallback((root: string) => {
+    setHiddenProjectRoots((prev) => {
+      const next = new Set(prev);
+      next.add(root);
+      try {
+        localStorage.setItem("pi-web:hidden-project-roots", JSON.stringify([...next]));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const unhideProject = useCallback((root: string) => {
+    setHiddenProjectRoots((prev) => {
+      if (!prev.has(root)) return prev;
+      const next = new Set(prev);
+      next.delete(root);
+      try {
+        localStorage.setItem("pi-web:hidden-project-roots", JSON.stringify([...next]));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
   const projectGroups = useMemo(
     () => groupSessionsByProject(allSessions, runningSessionIds, unreadSessionIds, projectOrder),
     [allSessions, runningSessionIds, unreadSessionIds, projectOrder],
+  );
+
+  const visibleProjectGroups = useMemo(
+    () => projectGroups.filter((group) => !hiddenProjectRoots.has(group.root)),
+    [projectGroups, hiddenProjectRoots],
   );
   const showWorktreeSwitcher = Boolean(
     worktreeState?.isGit
@@ -1710,12 +1754,29 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             {typeof error === "string" ? error : String((error as { message?: string })?.message ?? error)}
           </div>
         )}
-        {!loading && !error && allSessions.length === 0 && (
-          <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            {t("sidebar.noSessions")}
+        {visibleProjectGroups.length === 0 && !loading && !error && (
+          <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>
+            <div>{t("sidebar.noSessions")}</div>
+            <button
+              type="button"
+              onClick={() => setCustomPathOpen(true)}
+              style={{
+                marginTop: 10,
+                padding: "6px 12px",
+                fontSize: 11,
+                fontWeight: 600,
+                background: "var(--accent)",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              + {t("sidebar.addProject")}
+            </button>
           </div>
         )}
-        {projectGroups.map((group) => {
+        {visibleProjectGroups.map((group) => {
           const collapsed = collapsedProjectRoots.has(group.root);
           const color = projectColor(group.root);
           const isActiveProject = group.root === selectedProject;
@@ -1813,13 +1874,33 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   aria-label={`New session in ${displayCwd(group.root, homeDir)}`}
                   title={`New session in ${displayCwd(group.root, homeDir)}`}
                   style={{
-                    width: 28, height: 28, padding: 0, flexShrink: 0,
+                    width: 26, height: 26, padding: 0, flexShrink: 0,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     border: "none", borderRadius: 5, background: "none",
-                    color: "var(--text-muted)", cursor: "pointer", fontSize: 18, lineHeight: 1,
+                    color: "var(--text-muted)", cursor: "pointer", fontSize: 16, lineHeight: 1,
                   }}
                 >
                   +
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    hideProject(group.root);
+                  }}
+                  aria-label={t("sidebar.removeProjectTitle")}
+                  title={t("sidebar.removeProjectTitle")}
+                  style={{
+                    width: 24, height: 24, padding: 0, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    border: "none", borderRadius: 4, background: "none",
+                    color: "var(--text-dim)", cursor: "pointer", fontSize: 13,
+                    transition: "color 0.12s, background 0.12s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                >
+                  ✕
                 </button>
               </div>
               {!collapsed && group.tree.map((node) => (
@@ -1965,6 +2046,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   );
 }
 
+function hasRunningOrSelectedChild(node: SessionTreeNode, runningIds: Set<string>, selectedId: string | null): boolean {
+  for (const child of node.children) {
+    if (runningIds.has(child.session.id) || child.session.id === selectedId) return true;
+    if (hasRunningOrSelectedChild(child, runningIds, selectedId)) return true;
+  }
+  return false;
+}
+
 function SessionTreeItem({
   node,
   selectedSessionId,
@@ -1986,7 +2075,12 @@ function SessionTreeItem({
   depth: number;
   projectColor: string;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const hasActiveChild = useMemo(
+    () => hasRunningOrSelectedChild(node, runningSessionIds, selectedSessionId),
+    [node, runningSessionIds, selectedSessionId],
+  );
+  const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null);
+  const collapsed = userCollapsed ?? (depth > 0 ? !hasActiveChild : false);
   const hasChildren = node.children.length > 0;
 
   return (
@@ -2014,7 +2108,7 @@ function SessionTreeItem({
           depth={depth}
           hasChildren={hasChildren}
           collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed((v) => !v)}
+          onToggleCollapse={() => setUserCollapsed((v) => (v === null ? !collapsed : !v))}
           projectColor={projectColor}
         />
       </div>

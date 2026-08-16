@@ -162,6 +162,8 @@ export const trLocale: LocalePlugin = {
     "sidebar.messagesCount": "{count} mesaj",
     "sidebar.worktreePath": "Worktree: {path}",
     "sidebar.removeWorktreeTitle": "{path} worktree checkout'unu kaldır; dal korunur",
+    "sidebar.addProject": "Proje / Dizin Ekle",
+    "sidebar.removeProjectTitle": "Projeyi yan panelden kaldır",
     "files.modified": "Değiştirildi",
     "files.added": "Eklendi",
     "files.deleted": "Silindi",
