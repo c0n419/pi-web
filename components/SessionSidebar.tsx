@@ -2284,12 +2284,14 @@ function SessionItem({
       draggable={!renaming && !confirmDelete && !session.transient}
       onDragStart={(e) => {
         if (renaming || confirmDelete || session.transient) return;
-        e.dataTransfer.setData("text/plain", JSON.stringify({
+        const payload = JSON.stringify({
           type: "pi-session",
           sessionId: session.id,
           session,
-        }));
-        e.dataTransfer.effectAllowed = "copy";
+        });
+        e.dataTransfer.setData("text/plain", payload);
+        e.dataTransfer.setData("application/json", payload);
+        e.dataTransfer.effectAllowed = "copyMove";
       }}
       onClick={confirmDelete || renaming ? undefined : onClick}
       onContextMenu={confirmDelete || renaming ? undefined : handleContextMenu}

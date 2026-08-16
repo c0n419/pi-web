@@ -1231,6 +1231,7 @@ export function AppShell() {
   }, []);
 
   const handleSelectSessionForPane = useCallback((targetPaneId: string, session: SessionInfo) => {
+    sessionsMapRef.current.set(session.id, session);
     setPanes((current) => current.map((pane) => pane.id === targetPaneId
       ? { ...pane, session, cwd: session.cwd, projectRoot: session.projectRoot ?? null, revision: pane.revision + 1 }
       : pane));
@@ -1239,11 +1240,24 @@ export function AppShell() {
 
   const handleSelectSessionIdForPane = useCallback((targetPaneId: string, sessionId: string) => {
     const session = sessionsMapRef.current.get(sessionId);
-    if (!session) return;
-    setPanes((current) => current.map((pane) => pane.id === targetPaneId
-      ? { ...pane, session, cwd: session.cwd, projectRoot: session.projectRoot ?? null, revision: pane.revision + 1 }
-      : pane));
-    setFocusedPaneId(targetPaneId);
+    if (session) {
+      setPanes((current) => current.map((pane) => pane.id === targetPaneId
+        ? { ...pane, session, cwd: session.cwd, projectRoot: session.projectRoot ?? null, revision: pane.revision + 1 }
+        : pane));
+      setFocusedPaneId(targetPaneId);
+      return;
+    }
+    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: SessionInfo | null) => {
+        if (!data) return;
+        sessionsMapRef.current.set(data.id, data);
+        setPanes((current) => current.map((pane) => pane.id === targetPaneId
+          ? { ...pane, session: data, cwd: data.cwd, projectRoot: data.projectRoot ?? null, revision: pane.revision + 1 }
+          : pane));
+        setFocusedPaneId(targetPaneId);
+      })
+      .catch(() => {});
   }, []);
 
   const handleSetPaneLabel = useCallback((paneId: string, label: string | null) => {

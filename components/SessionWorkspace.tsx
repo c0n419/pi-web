@@ -176,22 +176,31 @@ export function SessionWorkspace({
 
   const handleDragOver = (e: React.DragEvent, tabOrPaneId: string, isTab: boolean) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
+    e.dataTransfer.dropEffect = isTab ? "move" : "copy";
     if (isTab) setDragOverTabId(tabOrPaneId);
     else setDragOverPaneId(tabOrPaneId);
   };
 
-  const handleDragLeave = (isTab: boolean) => {
+  const handleDragLeave = (e: React.DragEvent, isTab: boolean) => {
+    const current = e.currentTarget as HTMLElement | null;
+    const related = e.relatedTarget as Node | null;
+    if (current && related && current.contains(related)) {
+      return;
+    }
     if (isTab) setDragOverTabId(null);
     else setDragOverPaneId(null);
   };
 
   const handleDrop = (e: React.DragEvent, targetPaneId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverTabId(null);
     setDragOverPaneId(null);
     try {
-      const raw = e.dataTransfer.getData("text/plain");
+      const raw =
+        e.dataTransfer.getData("application/json") ||
+        e.dataTransfer.getData("text/plain") ||
+        e.dataTransfer.getData("Text");
       if (!raw) return;
       const data = JSON.parse(raw);
       if (data.type === "pane-tab" && data.paneId) {
@@ -305,7 +314,7 @@ export function SessionWorkspace({
               draggable={editingLabelPaneId !== pane.id}
               onDragStart={(e) => handleTabDragStart(e, pane.id)}
               onDragOver={(e) => handleDragOver(e, pane.id, true)}
-              onDragLeave={() => handleDragLeave(true)}
+              onDragLeave={(e) => handleDragLeave(e, true)}
               onDrop={(e) => handleDrop(e, pane.id)}
               className={`active-session-tab${focused ? " is-focused" : ""}${running ? " is-running" : ""}${isDragOver ? " is-drag-over" : ""}`}
             >
@@ -487,7 +496,7 @@ export function SessionWorkspace({
               className={`session-pane${focused ? " is-focused" : ""}${isMaximized ? " is-maximized" : ""}${hiddenOnMobile ? " is-mobile-hidden" : ""}${isDragOver ? " is-drag-over" : ""}`}
               onPointerDownCapture={() => { if (!focused) onFocusPane(pane.id); }}
               onDragOver={(e) => handleDragOver(e, pane.id, false)}
-              onDragLeave={() => handleDragLeave(false)}
+              onDragLeave={(e) => handleDragLeave(e, false)}
               onDrop={(e) => handleDrop(e, pane.id)}
             >
               {isDragOver && (
