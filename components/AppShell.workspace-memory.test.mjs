@@ -16,15 +16,27 @@ test("explicit context changes invalidate a pending workspace restore", () => {
   const callbacks = [
     ["handleCwdChange", "handleSelectSession"],
     ["handleSelectSession", "handleNewSession"],
-    ["handleNewSession", "hydrateSelectedSession"],
-    ["handleSessionCreated", "handleAgentEnd"],
-    ["handleSessionForked", "handleInitialRestoreDone"],
+    ["handleNewSession", "hydratePaneSession"],
     ["handleSessionDeleted", "handleOpenFile"],
   ];
 
   for (const [name, nextName] of callbacks) {
-    assert.match(callbackBody(name, nextName), /invalidateWorkspaceRestore\(\);/);
+    const body = callbackBody(name, nextName);
+    assert.match(body, /invalidateWorkspaceRestore\(\);/);
   }
+});
+
+test("async pane promotion projects global context only after a current focused commit", () => {
+  const created = callbackBody("handlePaneSessionCreated", "deliverSessionNotification");
+  const forked = callbackBody("handlePaneSessionForked", "handleInitialRestoreDone");
+  assert.match(created, /setPanes\(\(current\) =>/);
+  assert.match(created, /origin\.revision !== expectedRevision/);
+  assert.match(created, /origin\.session !== null/);
+  assert.match(created, /expectedKey !== sourceDraftKey/);
+  assert.match(forked, /setPanes\(\(current\) =>/);
+  assert.match(forked, /origin\.session\?\.id !== expectedSessionId/);
+  assert.match(source, /if \(focusedPaneIdRef\.current !== paneId\) continue;/);
+  assert.match(source, /invalidateWorkspaceRestore\(\);[\s\S]*?router\.replace\(`/);
 });
 
 test("all active-session transitions share one persistence effect", () => {
@@ -39,4 +51,13 @@ test("workspace restoration remains inside the cross-project branch", () => {
     callbackBody("handleCwdChange", "handleSelectSession"),
     /if \(currentProject !== newProject\) \{[\s\S]*?restoreWorkspaceContext\(newProject\);[\s\S]*?\}/,
   );
+});
+
+test("session deletion derives from live panes and preserves fallback project identity", () => {
+  const deleted = callbackBody("handleSessionDeleted", "handleOpenFile");
+  assert.match(deleted, /setPanes\(\(current\) =>/);
+  assert.match(deleted, /const liveFocusedPaneId = focusedPaneIdRef\.current/);
+  assert.match(deleted, /panes: current\.map/);
+  assert.match(deleted, /projectRoot: deletedPane\.session\?\.projectRoot \?\? deletedPane\.projectRoot/);
+  assert.match(deleted, /pendingPaneDeletionRef\.current =/);
 });

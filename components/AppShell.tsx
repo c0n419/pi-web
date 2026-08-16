@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
-import { ChatWindow } from "./ChatWindow";
+import { SessionWorkspace } from "./SessionWorkspace";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
@@ -29,6 +29,17 @@ import {
 } from "@/lib/browser-notifications";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import { clearLastOpen, getLastOpenSession, setLastOpenSession } from "@/lib/workspace-memory";
+import {
+  MAX_SESSION_PANES,
+  PANE_WORKSPACE_STORAGE_KEY,
+  closeWorkspacePane,
+  createPaneDescriptor,
+  createPaneWorkspace,
+  parsePaneWorkspace,
+  removeSessionFromWorkspace,
+  serializePaneWorkspace,
+  type PaneWorkspaceState,
+} from "@/lib/session-pane-workspace";
 import {
   getDefaultRightPanelWidth,
   getRightPanelMaxWidth,
@@ -56,6 +67,31 @@ type AutoNameStatus =
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
 const LANGUAGE_MENU_WIDTH = 176;
 
+interface RuntimePane {
+  id: string;
+  session: SessionInfo | null;
+  cwd: string | null;
+  projectRoot: string | null;
+  draftId: string;
+  revision: number;
+}
+
+function createRuntimePane(id: string, options: { session?: SessionInfo | null; cwd?: string | null; projectRoot?: string | null; draftId?: string } = {}): RuntimePane {
+  return {
+    id,
+    session: options.session ?? null,
+    cwd: options.cwd ?? null,
+    projectRoot: options.projectRoot ?? options.session?.projectRoot ?? null,
+    draftId: options.draftId ?? id,
+    revision: 0,
+  };
+}
+
+function createRuntimeId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -74,7 +110,48 @@ export function AppShell() {
   const handleBackgroundTaskDone = useCallback(() => {
     if (soundEnabledRef.current) playDoneSound();
   }, [playDoneSound, soundEnabledRef]);
-  const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
+  const [panes, setPanes] = useState<RuntimePane[]>(() => [createRuntimePane("pane-initial", { draftId: "initial" })]);
+  const [focusedPaneId, setFocusedPaneId] = useState("pane-initial");
+  const focusedPaneIdRef = useRef(focusedPaneId);
+  focusedPaneIdRef.current = focusedPaneId;
+  const pendingPaneCommitRef = useRef(new Map<string, { sessionId: string; clearDraft: boolean }>());
+  const pendingPaneFocusRef = useRef(new Map<string, { cwd: string | null; projectRoot: string | null }>());
+  const pendingPaneDeletionRef = useRef<{
+    deletedPane: RuntimePane;
+    nextFocusedPane: RuntimePane;
+    focusChanged: boolean;
+  } | null>(null);
+  const focusedPane = useMemo(
+    () => panes.find((pane) => pane.id === focusedPaneId) ?? panes[0],
+    [focusedPaneId, panes],
+  );
+  const selectedSession = focusedPane?.session ?? null;
+  const newSessionCwd = focusedPane?.cwd ?? null;
+  const newSessionDraftId = focusedPane?.draftId ?? "initial";
+  const setSelectedSession = useCallback((update: SessionInfo | null | ((current: SessionInfo | null) => SessionInfo | null)) => {
+    setPanes((current) => current.map((pane) => {
+      if (pane.id !== focusedPaneId) return pane;
+      const session = typeof update === "function" ? update(pane.session) : update;
+      return {
+        ...pane,
+        session,
+        projectRoot: session?.projectRoot ?? pane.projectRoot,
+      };
+    }));
+  }, [focusedPaneId]);
+  const setNewSessionCwd = useCallback((update: string | null | ((current: string | null) => string | null)) => {
+    setPanes((current) => current.map((pane) => {
+      if (pane.id !== focusedPaneId) return pane;
+      const cwd = typeof update === "function" ? update(pane.cwd) : update;
+      return { ...pane, cwd };
+    }));
+  }, [focusedPaneId]);
+  const setNewSessionDraftId = useCallback((draftId: string) => {
+    setPanes((current) => current.map((pane) => pane.id === focusedPaneId ? { ...pane, draftId } : pane));
+  }, [focusedPaneId]);
+  const bumpFocusedPaneRevision = useCallback(() => {
+    setPanes((current) => current.map((pane) => pane.id === focusedPaneId ? { ...pane, revision: pane.revision + 1 } : pane));
+  }, [focusedPaneId]);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
@@ -82,16 +159,13 @@ export function AppShell() {
       return ids;
     });
   }, []);
-  // The temporary id distinguishes consecutive fresh composers in one cwd.
-  const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
-  const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
+  // Fresh-composer keys live on their pane so concurrent drafts never collide.
   const activeNewSessionDraftKeyRef = useRef<string | null>(null);
   const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
     () => initialNavigation.requestedCwd ? "validating" : "idle",
   );
   const [initialCwdError, setInitialCwdError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
@@ -325,7 +399,7 @@ export function AppShell() {
 
   useEffect(() => {
     setMobileToolbarMoreOpen(false);
-  }, [isMobile, selectedSession?.id, newSessionDraftId]);
+  }, [isMobile, focusedPaneId, selectedSession?.id, newSessionDraftId]);
 
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
@@ -381,10 +455,17 @@ export function AppShell() {
   }, [isMobile]);
 
   const initialSessionId = initialNavigation.sessionId;
+  const [paneRestorePending] = useState(() => {
+    if (typeof window === "undefined" || initialNavigation.sessionId || initialNavigation.requestedCwd) return false;
+    return parsePaneWorkspace(window.localStorage.getItem(PANE_WORKSPACE_STORAGE_KEY)) !== null;
+  });
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
   const activeProjectRootRef = useRef<string | null>(null);
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
+  const [paneWorkspaceRestored, setPaneWorkspaceRestored] = useState(false);
+  const persistedPaneWorkspaceRef = useRef<PaneWorkspaceState | null>(null);
+  const hasExplicitDeepLink = initialNavigation.sessionId !== null || initialNavigation.requestedCwd !== null;
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
   const suppressCwdBumpRef = useRef(false);
   // Guards the async workspace restore so a slow response from an earlier
@@ -394,6 +475,69 @@ export function AppShell() {
   const invalidateWorkspaceRestore = useCallback(() => {
     workspaceRestoreTokenRef.current += 1;
   }, []);
+
+  useEffect(() => {
+    if (hasExplicitDeepLink) {
+      setPaneWorkspaceRestored(true);
+      return;
+    }
+    persistedPaneWorkspaceRef.current = parsePaneWorkspace(
+      window.localStorage.getItem(PANE_WORKSPACE_STORAGE_KEY),
+    );
+  }, [hasExplicitDeepLink]);
+
+  const handleSessionsChange = useCallback((sessions: SessionInfo[]) => {
+    const saved = persistedPaneWorkspaceRef.current;
+    if (!saved || hasExplicitDeepLink) {
+      setPaneWorkspaceRestored(true);
+      return;
+    }
+    persistedPaneWorkspaceRef.current = null;
+    const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+    const restored = saved.panes.flatMap((descriptor) => {
+      if (descriptor.sessionId) {
+        const session = sessionsById.get(descriptor.sessionId);
+        return session ? [createRuntimePane(descriptor.id, { session, cwd: session.cwd, projectRoot: session.projectRoot ?? descriptor.projectRoot, draftId: descriptor.draftId })] : [];
+      }
+      return descriptor.cwd
+        ? [createRuntimePane(descriptor.id, { cwd: descriptor.cwd, projectRoot: descriptor.projectRoot, draftId: descriptor.draftId })]
+        : [];
+    });
+    if (restored.length > 0) {
+      const restoredFocusId = restored.some((pane) => pane.id === saved.focusedPaneId)
+        ? saved.focusedPaneId
+        : restored[0].id;
+      const restoredFocus = restored.find((pane) => pane.id === restoredFocusId) ?? restored[0];
+      setPanes(restored);
+      setFocusedPaneId(restoredFocusId);
+      setActiveCwd(restoredFocus.session?.cwd ?? restoredFocus.cwd);
+      activeProjectRootRef.current = restoredFocus.session?.projectRoot
+        ?? restoredFocus.session?.cwd
+        ?? restoredFocus.cwd;
+      suppressCwdBumpRef.current = true;
+      router.replace(restoredFocus.session
+        ? `?session=${encodeURIComponent(restoredFocus.session.id)}`
+        : "/", { scroll: false });
+    }
+    setPaneWorkspaceRestored(true);
+  }, [hasExplicitDeepLink, router]);
+
+  useEffect(() => {
+    if (!paneWorkspaceRestored) return;
+    const state = createPaneWorkspace(createPaneDescriptor(panes[0].id));
+    state.panes = panes.map((pane) => createPaneDescriptor(pane.id, {
+      sessionId: pane.session?.id ?? null,
+      cwd: pane.session?.cwd ?? pane.cwd,
+      projectRoot: pane.session?.projectRoot ?? pane.projectRoot,
+      draftId: pane.draftId,
+    }));
+    state.focusedPaneId = panes.some((pane) => pane.id === focusedPaneId) ? focusedPaneId : panes[0].id;
+    try {
+      window.localStorage.setItem(PANE_WORKSPACE_STORAGE_KEY, serializePaneWorkspace(state));
+    } catch {
+      // Best effort only; private browsing and storage quotas may reject writes.
+    }
+  }, [focusedPaneId, paneWorkspaceRestored, panes]);
 
   // Persist every active-session transition, including new and forked sessions
   // that bypass the sidebar selection handler. Transient sessions do not yet
@@ -405,6 +549,30 @@ export function AppShell() {
       ?? selectedSession.cwd;
     setLastOpenSession(projectKey, selectedSession.id);
   }, [selectedSession]);
+
+  const focusPaneContext = useCallback((paneId: string) => {
+    const pane = panes.find((candidate) => candidate.id === paneId);
+    if (!pane || paneId === focusedPaneId) return;
+    const previousProject = selectedSession?.projectRoot ?? selectedSession?.cwd ?? activeProjectRootRef.current;
+    const nextProject = pane.session?.projectRoot ?? pane.projectRoot ?? pane.session?.cwd ?? pane.cwd;
+    setFocusedPaneId(paneId);
+    activeProjectRootRef.current = nextProject ?? null;
+    setActiveCwd(pane.cwd ?? pane.session?.cwd ?? null);
+    if (previousProject && nextProject && previousProject !== nextProject) {
+      setFileTabs([]);
+      setActiveFileTabId(null);
+      setRightPanelOpen(false);
+    }
+    setBranchTree([]);
+    setBranchActiveLeafId(null);
+    branchLeafChangeFnRef.current = null;
+    setSystemPrompt(null);
+    systemPromptLoaderRef.current = null;
+    setSessionStats(null);
+    setContextUsage(null);
+    setActiveTopPanel(null);
+    router.replace(pane.session ? `?session=${encodeURIComponent(pane.session.id)}` : "/", { scroll: false });
+  }, [focusedPaneId, panes, router, selectedSession]);
 
   useEffect(() => {
     const requestedCwd = initialNavigation.requestedCwd;
@@ -442,7 +610,7 @@ export function AppShell() {
       });
 
     return () => controller.abort();
-  }, [initialNavigation]);
+  }, [initialNavigation, setNewSessionCwd, setNewSessionDraftId]);
 
   // Restore the workspace's last open session after switching to it. Called
   // from handleCwdChange once the outgoing context has been reset. The session
@@ -474,7 +642,7 @@ export function AppShell() {
         // the null-session welcome mount from the switch would never load
         // the restored session's messages.
         setSelectedSession(s);
-        setSessionKey((k) => k + 1);
+        bumpFocusedPaneRevision();
         if (new URLSearchParams(window.location.search).get("session") !== s.id) {
           router.replace(`?session=${encodeURIComponent(s.id)}`, { scroll: false });
         }
@@ -482,7 +650,7 @@ export function AppShell() {
       .catch(() => {
         // Network hiccup: keep the remembered session for a later retry.
       });
-  }, [router]);
+  }, [bumpFocusedPaneRevision, router, setSelectedSession]);
 
   const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
     invalidateWorkspaceRestore();
@@ -491,6 +659,9 @@ export function AppShell() {
     // Skip if cwd is null (initial mount).
     if (!cwd) return;
     const newProject = projectRoot ?? cwd;
+    setPanes((current) => current.map((pane) => pane.id === focusedPaneId
+      ? { ...pane, cwd, projectRoot: newProject }
+      : pane));
     const currentProject = activeProjectRootRef.current
       ?? (selectedSession ? (selectedSession.projectRoot ?? selectedSession.cwd) : null);
     activeProjectRootRef.current = newProject;
@@ -518,11 +689,8 @@ export function AppShell() {
     setNewSessionDraftId(draftId);
     activeNewSessionDraftKeyRef.current = `new:${draftId}:${cwd}`;
     setSelectedSession(null);
-    setNewSessionCwd((prev) => {
-      if (prev && prev !== cwd) return null;
-      return prev;
-    });
-    setSessionKey((k) => k + 1);
+    setNewSessionCwd(cwd);
+    bumpFocusedPaneRevision();
     setBranchTree([]);
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
@@ -539,11 +707,20 @@ export function AppShell() {
       restoreWorkspaceContext(newProject);
     }
     router.replace("/", { scroll: false });
-  }, [activeCwd, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
+  }, [activeCwd, bumpFocusedPaneRevision, focusedPaneId, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext, setNewSessionCwd, setNewSessionDraftId, setSelectedSession]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     invalidateWorkspaceRestore();
+    const existingPane = panes.find((pane) => pane.session?.id === session.id);
+    if (existingPane && existingPane.id !== focusedPaneId) {
+      focusPaneContext(existingPane.id);
+      if (isMobile && !isRestore) setSidebarOpen(false);
+      return;
+    }
     activeNewSessionDraftKeyRef.current = null;
+    const nextProject = session.projectRoot ?? session.cwd;
+    const previousProject = activeProjectRootRef.current
+      ?? (selectedSession ? (selectedSession.projectRoot ?? selectedSession.cwd) : null);
     // Re-clicking the already-open session must not remount the chat and
     // re-run the full load/positioning cycle. Only skip when the effective
     // cwd context already matches — otherwise a pending cwd move still needs
@@ -557,9 +734,19 @@ export function AppShell() {
         return;
       }
     }
-    setNewSessionCwd(null);
+    // Adopt the selected session and its workspace as one transition. The
+    // sidebar's subsequent cwd notification must observe this project identity
+    // instead of clearing the cross-project selection in handleCwdChange.
+    activeProjectRootRef.current = nextProject;
+    setActiveCwd(session.cwd);
+    if (previousProject !== nextProject) {
+      setFileTabs([]);
+      setActiveFileTabId(null);
+      setRightPanelOpen(false);
+    }
+    setNewSessionCwd(session.cwd);
     setSelectedSession(session);
-    setSessionKey((k) => k + 1);
+    bumpFocusedPaneRevision();
     setSystemPrompt(null);
     setSystemPromptLoading(false);
     setInitialSessionRestored(true);
@@ -575,16 +762,18 @@ export function AppShell() {
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
-  }, [invalidateWorkspaceRestore, router, isMobile, selectedSession]);
+  }, [bumpFocusedPaneRevision, focusPaneContext, focusedPaneId, invalidateWorkspaceRestore, isMobile, panes, router, selectedSession, setNewSessionCwd, setSelectedSession]);
 
   const handleNewSession = useCallback((sessionId: string, cwd: string) => {
+    if (typeof sessionId !== "string") return;
+    if (typeof cwd !== "string") cwd = (sessionId as unknown as string);
     invalidateWorkspaceRestore();
     const draftKey = `new:${sessionId}:${cwd}`;
     activeNewSessionDraftKeyRef.current = draftKey;
     setNewSessionDraftId(sessionId);
     setSelectedSession(null);
     setNewSessionCwd(cwd);
-    setSessionKey((k) => k + 1);
+    bumpFocusedPaneRevision();
     setBranchTree([]);
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
@@ -592,7 +781,7 @@ export function AppShell() {
     setActiveTopPanel(null);
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
-  }, [invalidateWorkspaceRestore, router, isMobile]);
+  }, [activeCwd, bumpFocusedPaneRevision, invalidateWorkspaceRestore, router, isMobile, setNewSessionCwd, setNewSessionDraftId, setSelectedSession]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
@@ -604,32 +793,56 @@ export function AppShell() {
   // server-computed projectRoot, which the same-project check in
   // handleCwdChange relies on. Hydrate it from the session list so switching
   // worktrees right after creating a session doesn't close the chat.
-  const hydrateSelectedSession = useCallback((sessionId: string) => {
+  const hydratePaneSession = useCallback((paneId: string, sessionId: string) => {
     void fetch("/api/sessions", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
       .then((d) => {
         const full = d?.sessions.find((s) => s.id === sessionId);
         if (!full) return;
-        setSelectedSession((prev) => (
-          prev?.id === sessionId
-            ? { ...prev, ...full, transient: full.transient ?? false }
-            : prev
-        ));
+        setPanes((current) => current.map((pane) => (
+          pane.id === paneId && pane.session?.id === sessionId
+            ? {
+                ...pane,
+                cwd: full.cwd,
+                projectRoot: full.projectRoot ?? pane.projectRoot,
+                session: { ...pane.session, ...full, transient: full.transient ?? false },
+              }
+            : pane
+        )));
       })
       .catch(() => {});
   }, []);
 
-  // Called by ChatWindow when a new session gets its real id from pi
-  const handleSessionCreated = useCallback((session: SessionInfo, sourceDraftKey: string) => {
+  // Called by ChatWindow when a new session gets its real id from pi. The
+  // async result may arrive after this pane was replaced or closed, so all
+  // origin checks happen inside the functional update that commits it.
+  const handlePaneSessionCreated = useCallback((
+    paneId: string,
+    expectedRevision: number,
+    session: SessionInfo,
+    sourceDraftKey: string,
+  ) => {
     setRefreshKey((k) => k + 1);
-    if (activeNewSessionDraftKeyRef.current !== sourceDraftKey) return;
-    invalidateWorkspaceRestore();
-    activeNewSessionDraftKeyRef.current = null;
-    setNewSessionCwd(null);
-    setSelectedSession(session);
-    hydrateSelectedSession(session.id);
-    router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
-  }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
+    setPanes((current) => {
+      const origin = current.find((pane) => pane.id === paneId);
+      const expectedKey = origin?.cwd ? `new:${origin.draftId}:${origin.cwd}` : null;
+      if (
+        !origin
+        || origin.revision !== expectedRevision
+        || origin.session !== null
+        || expectedKey !== sourceDraftKey
+      ) return current;
+      pendingPaneCommitRef.current.set(paneId, { sessionId: session.id, clearDraft: true });
+      return current.map((pane) => pane.id === paneId
+        ? {
+            ...pane,
+            session,
+            cwd: session.cwd,
+            projectRoot: session.projectRoot ?? pane.projectRoot,
+          }
+        : pane);
+    });
+  }, []);
 
   const deliverSessionNotification = useCallback(({
     targetSession,
@@ -665,33 +878,35 @@ export function AppShell() {
     }
   }, [handleSelectSession]);
 
-  const handleAgentEnd = useCallback(() => {
+  const handlePaneAgentEnd = useCallback((paneId: string) => {
+    if (soundEnabledRef.current) playDoneSound();
     setRefreshKey((k) => k + 1);
-    setExplorerRefreshKey((k) => k + 1);
-    if (selectedSession) hydrateSelectedSession(selectedSession.id);
+    const pane = panes.find((candidate) => candidate.id === paneId);
+    if (paneId === focusedPaneId) setExplorerRefreshKey((k) => k + 1);
+    if (pane?.session) hydratePaneSession(paneId, pane.session.id);
 
     if (!shouldShowBrowserNotification()) return;
-    const targetSession = selectedSession;
+    const targetSession = pane?.session ?? null;
     deliverSessionNotification({
       targetSession,
       title: targetSession?.name ?? translate("i18n.sessionComplete"),
       body: translate("i18n.taskFinished"),
     });
-  }, [deliverSessionNotification, hydrateSelectedSession, selectedSession, translate]);
+  }, [deliverSessionNotification, focusedPaneId, hydratePaneSession, panes, playDoneSound, soundEnabledRef, translate]);
 
-  const handleAttentionNeeded = useCallback((request: BlockingExtensionUiRequest) => {
+  const handlePaneAttentionNeeded = useCallback((paneId: string, request: BlockingExtensionUiRequest) => {
     if (!shouldShowBrowserNotification()) return;
     if (!claimExtensionAttentionNotification(request, notifiedAttentionRequestIdsRef.current)) return;
 
     deliverSessionNotification({
-      targetSession: selectedSession,
+      targetSession: panes.find((pane) => pane.id === paneId)?.session ?? null,
       title: translate("i18n.attentionNeeded"),
       body: request.method === "custom"
         ? translate("i18n.extensionInputNeeded")
         : request.title,
       tag: `pi-extension-ui:${request.id}`,
     });
-  }, [deliverSessionNotification, selectedSession, translate]);
+  }, [deliverSessionNotification, panes, translate]);
 
   const handleAutoName = useCallback(async () => {
     const sessionId = selectedSession?.id;
@@ -722,7 +937,7 @@ export function AppShell() {
       setAutoNameStatus({ kind: "error", message });
       autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
     }
-  }, [autoNameStatus.kind, selectedSession?.id]);
+  }, [autoNameStatus.kind, selectedSession?.id, setSelectedSession]);
 
   useEffect(() => {
     if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
@@ -733,20 +948,43 @@ export function AppShell() {
     setExplorerRefreshKey((k) => k + 1);
   }, []);
 
-  const handleSessionForked = useCallback((newSessionId: string) => {
-    invalidateWorkspaceRestore();
-    activeNewSessionDraftKeyRef.current = null;
+  const handlePaneSessionForked = useCallback((
+    paneId: string,
+    expectedRevision: number,
+    expectedSessionId: string,
+    newSessionId: string,
+  ) => {
     setRefreshKey((k) => k + 1);
-    setSessionKey((k) => k + 1);
-    setNewSessionCwd(null);
-    setSelectedSession((prev) => ({
-      ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
-      id: newSessionId,
-      transient: false,
-    }));
-    hydrateSelectedSession(newSessionId);
-    router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
+    setPanes((current) => {
+      const origin = current.find((pane) => pane.id === paneId);
+      if (
+        !origin
+        || origin.revision !== expectedRevision
+        || origin.session?.id !== expectedSessionId
+      ) return current;
+      pendingPaneCommitRef.current.set(paneId, { sessionId: newSessionId, clearDraft: false });
+      return current.map((pane) => pane.id === paneId ? {
+        ...pane,
+        revision: pane.revision + 1,
+        session: { ...origin.session!, id: newSessionId, transient: false },
+      } : pane);
+    });
+  }, []);
+
+  useEffect(() => {
+    for (const [paneId, commit] of pendingPaneCommitRef.current) {
+      const pane = panes.find((candidate) => candidate.id === paneId);
+      if (pane?.session?.id !== commit.sessionId) continue;
+      pendingPaneCommitRef.current.delete(paneId);
+      hydratePaneSession(paneId, commit.sessionId);
+      if (focusedPaneIdRef.current !== paneId) continue;
+      invalidateWorkspaceRestore();
+      if (commit.clearDraft) activeNewSessionDraftKeyRef.current = null;
+      activeProjectRootRef.current = pane.session.projectRoot ?? pane.projectRoot ?? pane.session.cwd;
+      setActiveCwd(pane.session.cwd);
+      router.replace(`?session=${encodeURIComponent(commit.sessionId)}`, { scroll: false });
+    }
+  }, [hydratePaneSession, invalidateWorkspaceRestore, panes, router]);
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
@@ -755,24 +993,73 @@ export function AppShell() {
   const handleSessionDeleted = useCallback((sessionId: string) => {
     invalidateWorkspaceRestore();
     setRefreshKey((k) => k + 1);
-    if (selectedSession?.id === sessionId) {
-      const cwd = selectedSession.cwd;
-      const draftId = typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-      setNewSessionDraftId(draftId);
-      activeNewSessionDraftKeyRef.current = cwd ? `new:${draftId}:${cwd}` : null;
-      setSelectedSession(null);
-      setNewSessionCwd(cwd ?? null);
-      setSessionKey((k) => k + 1);
-      setBranchTree([]);
-      setBranchActiveLeafId(null);
-      setSystemPrompt(null);
-      setSystemPromptLoading(false);
-      setActiveTopPanel(null);
-      router.replace("/", { scroll: false });
+    setPanes((current) => {
+      const deletedPane = current.find((pane) => pane.session?.id === sessionId);
+      if (!deletedPane) return current;
+      const liveFocusedPaneId = focusedPaneIdRef.current;
+      const descriptorState: PaneWorkspaceState = {
+        version: 1,
+        panes: current.map((pane) => createPaneDescriptor(pane.id, {
+          sessionId: pane.session?.id ?? null,
+          cwd: pane.cwd ?? pane.session?.cwd,
+          projectRoot: pane.session?.projectRoot ?? pane.projectRoot,
+          draftId: pane.draftId,
+        })),
+        focusedPaneId: liveFocusedPaneId,
+      };
+      const next = removeSessionFromWorkspace(descriptorState, sessionId, (cwd) => {
+        const id = createRuntimeId("pane");
+        return createPaneDescriptor(id, {
+          cwd,
+          projectRoot: deletedPane.session?.projectRoot ?? deletedPane.projectRoot,
+          draftId: createRuntimeId("draft"),
+        });
+      });
+      const nextRuntime = next.panes.map((descriptor) => {
+        const existing = current.find((pane) => pane.id === descriptor.id);
+        return existing ?? createRuntimePane(descriptor.id, {
+          cwd: descriptor.cwd,
+          projectRoot: descriptor.projectRoot,
+          draftId: descriptor.draftId,
+        });
+      });
+      const nextFocusedPane = nextRuntime.find((pane) => pane.id === next.focusedPaneId) ?? nextRuntime[0];
+      pendingPaneDeletionRef.current = {
+        deletedPane,
+        nextFocusedPane,
+        focusChanged: deletedPane.id === liveFocusedPaneId,
+      };
+      return nextRuntime;
+    });
+  }, [invalidateWorkspaceRestore]);
+
+  useEffect(() => {
+    const transition = pendingPaneDeletionRef.current;
+    if (!transition) return;
+    pendingPaneDeletionRef.current = null;
+    if (!transition.focusChanged) return;
+    const { deletedPane, nextFocusedPane } = transition;
+    const previousProject = deletedPane.session?.projectRoot ?? deletedPane.projectRoot ?? deletedPane.session?.cwd ?? deletedPane.cwd;
+    const nextProject = nextFocusedPane.session?.projectRoot ?? nextFocusedPane.projectRoot ?? nextFocusedPane.session?.cwd ?? nextFocusedPane.cwd;
+    setFocusedPaneId(nextFocusedPane.id);
+    setActiveCwd(nextFocusedPane.cwd ?? nextFocusedPane.session?.cwd ?? null);
+    activeProjectRootRef.current = nextProject ?? null;
+    if (previousProject && nextProject && previousProject !== nextProject) {
+      setFileTabs([]);
+      setActiveFileTabId(null);
+      setRightPanelOpen(false);
     }
-  }, [invalidateWorkspaceRestore, selectedSession, router]);
+    setBranchTree([]);
+    setBranchActiveLeafId(null);
+    setSystemPrompt(null);
+    setSystemPromptLoading(false);
+    setSessionStats(null);
+    setContextUsage(null);
+    setActiveTopPanel(null);
+    router.replace(nextFocusedPane.session
+      ? `?session=${encodeURIComponent(nextFocusedPane.session.id)}`
+      : "/", { scroll: false });
+  }, [panes, router]);
 
   const handleOpenFile = useCallback((
     filePath: string,
@@ -811,6 +1098,145 @@ export function AppShell() {
       return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
     });
   }, [fileTabs]);
+
+  const handleAddPane = useCallback((targetCwd?: string | unknown) => {
+    const safeTargetCwd = typeof targetCwd === "string" ? targetCwd : undefined;
+    const paneId = createRuntimeId("pane");
+    const draftId = createRuntimeId("draft");
+    const cwd = safeTargetCwd ?? selectedSession?.cwd ?? newSessionCwd ?? activeCwd;
+    const projectRoot = safeTargetCwd ? safeTargetCwd : (selectedSession?.projectRoot ?? focusedPane?.projectRoot ?? activeProjectRootRef.current);
+    setPanes((current) => {
+      if (current.length >= MAX_SESSION_PANES) return current;
+      pendingPaneFocusRef.current.set(paneId, { cwd, projectRoot });
+      return [...current, createRuntimePane(paneId, { cwd, projectRoot, draftId })];
+    });
+  }, [activeCwd, focusedPane?.projectRoot, newSessionCwd, selectedSession?.cwd, selectedSession?.projectRoot]);
+
+  const handlePaneCwdChange = useCallback((paneId: string, cwd: string) => {
+    void fetch("/api/cwd/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: cwd }),
+    })
+      .then((r) => r.json())
+      .then((data: { ok?: boolean; path?: string; projectRoot?: string }) => {
+        const canonicalCwd = data.ok && data.path ? data.path : cwd;
+        const canonicalProjectRoot = data.ok && data.projectRoot ? data.projectRoot : canonicalCwd;
+        setPanes((current) => current.map((pane) => {
+          if (pane.id !== paneId) return pane;
+          return {
+            ...pane,
+            cwd: canonicalCwd,
+            projectRoot: canonicalProjectRoot,
+            revision: pane.revision + 1,
+          };
+        }));
+        if (paneId === focusedPaneIdRef.current) {
+          setActiveCwd(canonicalCwd);
+          activeProjectRootRef.current = canonicalProjectRoot;
+        }
+      })
+      .catch(() => {
+        setPanes((current) => current.map((pane) => {
+          if (pane.id !== paneId) return pane;
+          return { ...pane, cwd, revision: pane.revision + 1 };
+        }));
+      });
+  }, []);
+
+  useEffect(() => {
+    for (const [paneId, context] of pendingPaneFocusRef.current) {
+      if (!panes.some((pane) => pane.id === paneId)) continue;
+      pendingPaneFocusRef.current.delete(paneId);
+      setFocusedPaneId(paneId);
+      setActiveCwd(context.cwd);
+      activeProjectRootRef.current = context.projectRoot ?? context.cwd;
+      setBranchTree([]);
+      setBranchActiveLeafId(null);
+      setSystemPrompt(null);
+      setSessionStats(null);
+      setContextUsage(null);
+      setActiveTopPanel(null);
+      router.replace("/", { scroll: false });
+    }
+  }, [panes, router]);
+
+  const handleClosePane = useCallback((paneId: string) => {
+    const closing = panes.find((pane) => pane.id === paneId);
+    if (!closing) return;
+    const fallbackId = createRuntimeId("pane");
+    const fallbackDraftId = createRuntimeId("draft");
+    const descriptors: PaneWorkspaceState = {
+      version: 1,
+      panes: panes.map((pane) => createPaneDescriptor(pane.id, {
+        sessionId: pane.session?.id ?? null,
+        cwd: pane.cwd ?? pane.session?.cwd,
+        projectRoot: pane.session?.projectRoot ?? pane.projectRoot,
+        draftId: pane.draftId,
+      })),
+      focusedPaneId,
+    };
+    const next = closeWorkspacePane(
+      descriptors,
+      paneId,
+      createPaneDescriptor(fallbackId, {
+        cwd: closing.cwd ?? closing.session?.cwd,
+        projectRoot: closing.session?.projectRoot ?? closing.projectRoot,
+        draftId: fallbackDraftId,
+      }),
+    );
+    const nextRuntime = next.panes.map((descriptor) => {
+      const existing = panes.find((pane) => pane.id === descriptor.id);
+      return existing ?? createRuntimePane(descriptor.id, { cwd: descriptor.cwd, projectRoot: descriptor.projectRoot, draftId: descriptor.draftId });
+    });
+    setPanes(nextRuntime);
+    setFocusedPaneId(next.focusedPaneId);
+    if (paneId === focusedPaneId) {
+      const nextFocused = nextRuntime.find((pane) => pane.id === next.focusedPaneId) ?? nextRuntime[0];
+      const previousProject = closing.session?.projectRoot ?? closing.projectRoot ?? closing.session?.cwd ?? closing.cwd;
+      const nextProject = nextFocused.session?.projectRoot ?? nextFocused.projectRoot ?? nextFocused.session?.cwd ?? nextFocused.cwd;
+      setActiveCwd(nextFocused.cwd ?? nextFocused.session?.cwd ?? null);
+      activeProjectRootRef.current = nextProject ?? null;
+      if (previousProject && nextProject && previousProject !== nextProject) {
+        setFileTabs([]);
+        setActiveFileTabId(null);
+        setRightPanelOpen(false);
+      }
+      setBranchTree([]);
+      setBranchActiveLeafId(null);
+      setSystemPrompt(null);
+      systemPromptLoaderRef.current = null;
+      setSessionStats(null);
+      setContextUsage(null);
+      setActiveTopPanel(null);
+      router.replace(nextFocused.session ? `?session=${encodeURIComponent(nextFocused.session.id)}` : "/", { scroll: false });
+    }
+  }, [focusedPaneId, panes, router]);
+
+  const handleSwapPanes = useCallback((paneIdA: string, paneIdB: string) => {
+    if (paneIdA === paneIdB) return;
+    setPanes((current) => {
+      const idxA = current.findIndex((p) => p.id === paneIdA);
+      const idxB = current.findIndex((p) => p.id === paneIdB);
+      if (idxA < 0 || idxB < 0) return current;
+      const next = [...current];
+      const temp = next[idxA];
+      next[idxA] = next[idxB];
+      next[idxB] = temp;
+      return next;
+    });
+  }, []);
+
+  const handleSelectSessionForPane = useCallback((targetPaneId: string, session: SessionInfo) => {
+    setPanes((current) => current.map((pane) => pane.id === targetPaneId
+      ? { ...pane, session, cwd: session.cwd, projectRoot: session.projectRoot ?? null, revision: pane.revision + 1 }
+      : pane));
+    setFocusedPaneId(targetPaneId);
+  }, []);
+
+  const handleSetPaneLabel = useCallback((paneId: string, label: string | null) => {
+    setPanes((current) => current.map((pane) => pane.id === paneId ? { ...pane, label: label?.trim() || null } : pane));
+  }, []);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -871,14 +1297,18 @@ export function AppShell() {
       setProjectTrust(data);
       setProjectTrustDialogOpen(false);
       setModelsRefreshKey((key) => key + 1);
-      setSessionKey((key) => key + 1);
+      bumpFocusedPaneRevision();
     } catch (error) {
       setProjectTrustError(error instanceof Error ? error.message : String(error));
     } finally {
       setProjectTrustBusy(false);
     }
-  }, [projectTrustBusy, projectTrustCwd]);
+  }, [bumpFocusedPaneRevision, projectTrustBusy, projectTrustCwd]);
 
+  const openSessionIds = useMemo(
+    () => new Set(panes.flatMap((pane) => pane.session ? [pane.session.id] : [])),
+    [panes],
+  );
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
   const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
@@ -901,7 +1331,7 @@ export function AppShell() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         initialSessionId={initialSessionId}
-        skipInitialProjectSelection={initialNavigation.requestedCwd !== null}
+        skipInitialProjectSelection={initialNavigation.requestedCwd !== null || paneRestorePending}
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
@@ -914,6 +1344,8 @@ export function AppShell() {
         onAtMentions={handleAtMentions}
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
+        onSessionsChange={handleSessionsChange}
+        openSessionIds={openSessionIds}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -2064,34 +2496,40 @@ export function AppShell() {
         {isMobile && renderProjectTrustWarning(true)}
         </div>
 
-        {/* Chat content */}
-        <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat ? (
-            <ChatWindow
-              key={sessionKey}
-              session={selectedSession}
-              sessionRunning={Boolean(selectedSession && runningSessionIds.has(selectedSession.id))}
-              newSessionCwd={effectiveNewSessionCwd}
-              newSessionDraftKey={newSessionDraftKey}
-              onAgentEnd={handleAgentEnd}
-              onAttentionNeeded={handleAttentionNeeded}
-              onSessionCreated={handleSessionCreated}
-              onSessionForked={handleSessionForked}
-              modelsRefreshKey={modelsRefreshKey}
-              chatInputRef={chatInputRef}
-              onBranchDataChange={handleBranchDataChange}
-              onSystemPromptChange={handleSystemPromptChange}
-              onSystemPromptLoaderChange={handleSystemPromptLoaderChange}
-              onSessionStatsChange={handleSessionStatsChange}
-              onSessionStatsPanelOpen={openSessionStatsPanel}
-              onContextUsageChange={handleContextUsageChange}
-              onOpenFile={handleOpenLinkedFile}
-              soundEnabled={soundEnabled}
-              onSoundToggle={onSoundToggle}
-              playDoneSound={playDoneSound}
-              unlockAudio={unlockAudio}
-            />
-          ) : initialCwdStatus === "validating" ? (
+        {/* Active sessions and independently mounted pane workspace */}
+        <SessionWorkspace
+          panes={panes}
+          focusedPaneId={focusedPaneId}
+          runningSessionIds={runningSessionIds}
+          isMobile={isMobile}
+          maxPanes={MAX_SESSION_PANES}
+          modelsRefreshKey={modelsRefreshKey}
+          activeCwd={activeCwd}
+          focusedChatInputRef={chatInputRef}
+          soundEnabled={soundEnabled}
+          onSoundToggle={onSoundToggle}
+          playDoneSound={playDoneSound}
+          unlockAudio={unlockAudio}
+          onFocusPane={focusPaneContext}
+          onAddPane={handleAddPane}
+          onClosePane={handleClosePane}
+          onSwapPanes={handleSwapPanes}
+          onSelectSessionForPane={handleSelectSessionForPane}
+          onSetPaneLabel={handleSetPaneLabel}
+          onPaneCwdChange={handlePaneCwdChange}
+          onPaneAgentEnd={handlePaneAgentEnd}
+          onPaneAttentionNeeded={handlePaneAttentionNeeded}
+          onPaneSessionCreated={handlePaneSessionCreated}
+          onPaneSessionForked={handlePaneSessionForked}
+          onFocusedBranchDataChange={handleBranchDataChange}
+          onFocusedSystemPromptChange={handleSystemPromptChange}
+          onFocusedSystemPromptLoaderChange={handleSystemPromptLoaderChange}
+          onFocusedSessionStatsChange={handleSessionStatsChange}
+          onFocusedSessionStatsPanelOpen={openSessionStatsPanel}
+          onFocusedContextUsageChange={handleContextUsageChange}
+          onFocusedOpenFile={handleOpenLinkedFile}
+        >
+          {!showChat && (initialCwdStatus === "validating" ? (
             <div
               role="status"
               style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
@@ -2131,8 +2569,8 @@ export function AppShell() {
                 </div>
               </div>
             )
-          ) : null}
-        </div>
+          ) : null)}
+        </SessionWorkspace>
       </div>
 
       <div
@@ -2256,7 +2694,7 @@ export function AppShell() {
         cwd={projectTrustCwd}
         sessionId={selectedSession?.id ?? null}
         onClose={() => setPluginsConfigOpen(false)}
-        onReloaded={() => setSessionKey((k) => k + 1)}
+        onReloaded={bumpFocusedPaneRevision}
       />
     )}
     </>

@@ -63,7 +63,8 @@ export default function RootLayout({
         <meta name="google" content="notranslate" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("pi-theme");var dark=t==="dark"||((t==null||t===""||t==="auto")&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark")}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem("pi-theme");var dark=t==="dark"||((t==null||t===""||t==="auto")&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark")}catch(e){}})();
+(function(){try{if(typeof window!=="undefined"&&!window.__pi_fetch_patched__){window.__pi_fetch_patched__=true;var origFetch=window.fetch;window.fetch=function(input,init){if(typeof input==="string"&&input.startsWith("/")){input=window.location.origin+input}return origFetch.call(this,input,init)}}}catch(e){}})();`,
           }}
         />
       </head>

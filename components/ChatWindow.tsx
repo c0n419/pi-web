@@ -25,9 +25,14 @@ import {
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
 
+import { DirectoryPicker } from "./DirectoryPicker";
+import { displayCwd, getRecentProjects } from "./SessionSidebar";
+import { projectColor } from "@/lib/session-project-groups";
+
 interface Props {
   session: SessionInfo | null;
   sessionRunning?: boolean;
+  isFocused?: boolean;
   newSessionCwd: string | null;
   newSessionDraftKey: string | null;
   onAgentEnd?: () => void;
@@ -49,6 +54,7 @@ interface Props {
   onSoundToggle?: () => void;
   playDoneSound?: () => void;
   unlockAudio?: () => void;
+  onNewSessionCwdChange?: (newCwd: string) => void;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -247,9 +253,14 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, sessionRunning, isFocused = true, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, onNewSessionCwdChange }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const [cwdMenuOpen, setCwdMenuOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<string[]>([]);
+  const [homeDir, setHomeDir] = useState("");
+  const cwdMenuRef = useRef<HTMLDivElement>(null);
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
   // wrapping handleAgentEventRef because useAgentSession overwrites that ref
@@ -261,9 +272,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   soundEnabledRef.current = soundEnabled;
   const soundedExtensionDialogIdRef = useRef<string | null>(null);
   const wrappedOnAgentEnd = useCallback(() => {
-    if (soundEnabledRef.current) {
-      playDoneSoundRef.current();
-    }
+    // AppShell owns completion audio so one logical completion has one sound,
+    // regardless of which pane is focused.
     onAgentEnd?.();
   }, [onAgentEnd]);
 
@@ -298,13 +308,55 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   useEffect(() => {
     if (!extensionDialog || soundedExtensionDialogIdRef.current === extensionDialog.id) return;
     soundedExtensionDialogIdRef.current = extensionDialog.id;
-    playDoneSoundRef.current();
+    if (soundEnabledRef.current) playDoneSoundRef.current();
   }, [extensionDialog]);
 
-  // Register the abort handler for the global Esc shortcut
   useEffect(() => {
+    fetch("/api/home").then((r) => r.json()).then((d: { home?: string }) => {
+      if (d.home) setHomeDir(d.home);
+    }).catch(() => {});
+    fetch("/api/sessions").then((r) => r.json()).then((d: { sessions?: SessionInfo[] }) => {
+      if (d.sessions) setRecentProjects(getRecentProjects(d.sessions));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!cwdMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (cwdMenuRef.current && !cwdMenuRef.current.contains(e.target as Node)) {
+        setCwdMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [cwdMenuOpen]);
+  useEffect(() => {
+    if (!isFocused) return;
     registerAbortHandler(sessionBusy ? handleAbort : null);
-  }, [sessionBusy, handleAbort]);
+    return () => registerAbortHandler(null);
+  }, [isFocused, sessionBusy, handleAbort]);
+
+  // A mobile-hidden pane remains mounted and can keep streaming. Remember
+  // whether it was following the tail before it becomes hidden, then repair
+  // measurements and restore that follow state when it is focused again.
+  const followBottomWhenVisibleRef = useRef(true);
+  useLayoutEffect(() => {
+    if (!isFocused) return;
+    const container = scrollContainerRef.current;
+    const frame = requestAnimationFrame(() => {
+      if (followBottomWhenVisibleRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      }
+      window.dispatchEvent(new Event("resize"));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (container) {
+        followBottomWhenVisibleRef.current =
+          container.scrollHeight - container.clientHeight - container.scrollTop <= 80;
+      }
+    };
+  }, [isFocused, messagesEndRef, scrollContainerRef]);
 
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the
@@ -583,7 +635,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   if (error) {
     return (
       <div className="flex h-full items-center justify-center text-red-400">
-        {error}
+        {typeof error === "string" ? error : String((error as { message?: string })?.message ?? error)}
       </div>
     );
   }
@@ -673,6 +725,121 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               </div>
             </div>
             <NoticeShelf notices={notices} align="right" />
+            
+            {/* Working Directory Selector for new sessions */}
+            <div style={{ position: "relative", marginBottom: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "var(--bg-panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" strokeWidth="1.4">
+                    <path d="M1.5 3h4l1.5 2h7.5v7.5h-13z" />
+                  </svg>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, flexShrink: 0 }}>
+                    {t("panes.workingDirectory")}:
+                  </span>
+                  <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {displayCwd(messageCwd ?? newSessionCwd ?? homeDir ?? "", homeDir)}
+                  </span>
+                </div>
+                {onNewSessionCwdChange && (
+                  <button
+                    type="button"
+                    onClick={() => setCwdMenuOpen((v) => !v)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      background: "var(--bg-hover)", border: "1px solid var(--border)",
+                      borderRadius: 6, padding: "4px 8px", fontSize: 11,
+                      color: "var(--accent)", cursor: "pointer", fontWeight: 500, flexShrink: 0,
+                    }}
+                  >
+                    {t("panes.changeDirectory")} ▾
+                  </button>
+                )}
+              </div>
+
+              {cwdMenuOpen && (
+                <div
+                  ref={cwdMenuRef}
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    left: 0,
+                    right: 0,
+                    zIndex: 100,
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                    padding: "4px 0",
+                  }}
+                >
+                  <div style={{ padding: "6px 10px 4px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase" }}>
+                    {t("sidebar.filterProjects")}
+                  </div>
+                  {recentProjects.map((proj) => (
+                    <button
+                      key={proj}
+                      onClick={() => {
+                        setCwdMenuOpen(false);
+                        onNewSessionCwdChange?.(proj);
+                      }}
+                      style={{
+                        width: "100%", textAlign: "left", padding: "6px 10px", fontSize: 11,
+                        background: "none", border: "none", color: "var(--text)", cursor: "pointer",
+                        display: "flex", alignItems: "center", gap: 6,
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: projectColor(proj), flexShrink: 0 }} />
+                      <span style={{ fontFamily: "var(--font-mono)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {displayCwd(proj, homeDir)}
+                      </span>
+                    </button>
+                  ))}
+                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+                  <button
+                    onClick={() => {
+                      setCwdMenuOpen(false);
+                      setPickerOpen(true);
+                    }}
+                    style={{
+                      width: "100%", textAlign: "left", padding: "6px 10px", fontSize: 11,
+                      background: "none", border: "none", color: "var(--accent)", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 6, fontWeight: 500,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                      <path d="M1.5 3h4l1.5 2h7.5v7.5h-13z" />
+                    </svg>
+                    {t("sidebar.selectDirectoryForNewSession")}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {pickerOpen && (
+              <DirectoryPicker
+                onSelect={(path) => {
+                  setPickerOpen(false);
+                  onNewSessionCwdChange?.(path);
+                }}
+                onCancel={() => setPickerOpen(false)}
+              />
+            )}
+
             {chatInputElement}
             <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
           </div>

@@ -6,6 +6,7 @@ const source = await readFile(new URL("./useAgentSession.ts", import.meta.url), 
 const chatWindowSource = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
 const chatInputSource = await readFile(new URL("../components/ChatInput.tsx", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../components/AppShell.tsx", import.meta.url), "utf8");
+const sessionWorkspaceSource = await readFile(new URL("../components/SessionWorkspace.tsx", import.meta.url), "utf8");
 
 test("keeps the session event stream open through the idle grace window", () => {
   const finishSource = source.slice(
@@ -163,26 +164,40 @@ test("stale fresh-session completion cannot replace the active composer", () => 
     appShellSource.indexOf("  // Global keyboard shortcuts"),
   );
   const createdSource = appShellSource.slice(
-    appShellSource.indexOf("  const handleSessionCreated = useCallback"),
-    appShellSource.indexOf("  const handleAgentEnd = useCallback"),
+    appShellSource.indexOf("  const handlePaneSessionCreated = useCallback"),
+    appShellSource.indexOf("  const deliverSessionNotification = useCallback"),
   );
 
   assert.match(newSessionSource, /const draftKey = `new:\$\{sessionId\}:\$\{cwd\}`/);
   assert.match(newSessionSource, /activeNewSessionDraftKeyRef\.current = draftKey/);
-  assert.match(createdSource, /activeNewSessionDraftKeyRef\.current !== sourceDraftKey/);
+  assert.match(createdSource, /expectedKey !== sourceDraftKey/);
   assert.match(cwdChangeSource, /const currentFreshCwd = newSessionCwd \?\? activeCwd/);
   assert.match(
     cwdChangeSource,
     /currentProject === newProject\s*&& \(selectedSession !== null \|\| currentFreshCwd === cwd\)/,
   );
   assert.match(cwdChangeSource, /if \(currentProject !== newProject\) \{[\s\S]*?setFileTabs\(\[\]\)/);
+  const selectSource = appShellSource.slice(
+    appShellSource.indexOf("  const handleSelectSession = useCallback"),
+    appShellSource.indexOf("  const handleNewSession = useCallback"),
+  );
+  assert.ok(
+    selectSource.indexOf("activeProjectRootRef.current = nextProject")
+      < selectSource.indexOf("setSelectedSession(session)"),
+  );
+  assert.match(selectSource, /setActiveCwd\(session\.cwd\)/);
+  assert.match(selectSource, /previousProject !== nextProject[\s\S]*?setFileTabs\(\[\]\)/);
   assert.match(
     appShellSource,
     /useLayoutEffect\(\(\) => \{\s*activeNewSessionDraftKeyRef\.current = newSessionDraftKey;/,
   );
   assert.ok(
-    createdSource.indexOf("activeNewSessionDraftKeyRef.current !== sourceDraftKey")
-      < createdSource.indexOf("setSelectedSession(session)"),
+    createdSource.indexOf("expectedKey !== sourceDraftKey")
+      < createdSource.indexOf("pendingPaneCommitRef.current.set"),
+  );
+  assert.match(
+    appShellSource,
+    /if \(pane\?\.session\?\.id !== commit\.sessionId\) continue;[\s\S]*?hydratePaneSession\(paneId, commit\.sessionId\)/,
   );
 });
 
@@ -255,7 +270,7 @@ test("connects a selected session when another browser reports it running", () =
   assert.doesNotMatch(source, /void connectEvents\(/);
   assert.match(chatWindowSource, /sessionRunning\?: boolean/);
   assert.match(chatWindowSource, /session, sessionRunning, newSessionCwd/);
-  assert.match(appShellSource, /runningSessionIds\.has\(selectedSession\.id\)/);
+  assert.match(sessionWorkspaceSource, /runningSessionIds\.has\(pane\.session\.id\)/);
   assert.match(appShellSource, /onRunningSessionIdsChange=\{handleRunningSessionIdsChange\}/);
 });
 
@@ -301,15 +316,15 @@ test("plays the enabled sound once for each extension dialog", () => {
 
 test("routes blocking extension requests through deduplicated browser attention notifications", () => {
   const completionSource = appShellSource.slice(
-    appShellSource.indexOf("  const handleAgentEnd = useCallback"),
-    appShellSource.indexOf("  const handleAttentionNeeded = useCallback"),
+    appShellSource.indexOf("  const handlePaneAgentEnd = useCallback"),
+    appShellSource.indexOf("  const handlePaneAttentionNeeded = useCallback"),
   );
   const extensionRequestSource = source.slice(
     source.indexOf("  const handleExtensionUiRequest = useCallback"),
     source.indexOf("  const settleUiStage = useCallback"),
   );
   const attentionSource = appShellSource.slice(
-    appShellSource.indexOf("  const handleAttentionNeeded = useCallback"),
+    appShellSource.indexOf("  const handlePaneAttentionNeeded = useCallback"),
     appShellSource.indexOf("  const handleAutoName = useCallback"),
   );
 
@@ -323,7 +338,7 @@ test("routes blocking extension requests through deduplicated browser attention 
   assert.match(attentionSource, /shouldShowBrowserNotification\(\)/);
   assert.match(attentionSource, /claimExtensionAttentionNotification\(request, notifiedAttentionRequestIdsRef\.current\)/);
   assert.match(attentionSource, /tag: `pi-extension-ui:\$\{request\.id\}`/);
-  assert.match(appShellSource, /onAttentionNeeded=\{handleAttentionNeeded\}/);
+  assert.match(appShellSource, /onPaneAttentionNeeded=\{handlePaneAttentionNeeded\}/);
 });
 
 test("keeps live following cancellable when the user scrolls away from the tail", () => {
