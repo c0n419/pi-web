@@ -75,9 +75,30 @@ export function SessionWorkspace({
   const { t } = useI18n();
 
   // Internal interactive state for Focus Mode, Presets, Broadcast & Handoff
-  const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
-  const [layoutPreset, setLayoutPresetState] = useState<PaneLayoutPreset>("auto");
+  const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("pi-web:pane-maximized-id") || null;
+  });
+  const [layoutPreset, setLayoutPresetState] = useState<PaneLayoutPreset>(() => {
+    if (typeof window === "undefined") return "auto";
+    const saved = localStorage.getItem("pi-web:pane-layout-preset");
+    const valid: PaneLayoutPreset[] = ["auto", "1x1", "1+2", "2x1", "2x2"];
+    return valid.includes(saved as PaneLayoutPreset) ? (saved as PaneLayoutPreset) : "auto";
+  });
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("pi-web:pane-layout-preset", layoutPreset);
+    } catch {}
+  }, [layoutPreset]);
+
+  useEffect(() => {
+    try {
+      if (maximizedPaneId) localStorage.setItem("pi-web:pane-maximized-id", maximizedPaneId);
+      else localStorage.removeItem("pi-web:pane-maximized-id");
+    } catch {}
+  }, [maximizedPaneId]);
 
   const [isBroadcastActive, setIsBroadcastActive] = useState(false);
   const [broadcastText, setBroadcastText] = useState("");

@@ -74,9 +74,10 @@ interface RuntimePane {
   projectRoot: string | null;
   draftId: string;
   revision: number;
+  label?: string | null;
 }
 
-function createRuntimePane(id: string, options: { session?: SessionInfo | null; cwd?: string | null; projectRoot?: string | null; draftId?: string } = {}): RuntimePane {
+function createRuntimePane(id: string, options: { session?: SessionInfo | null; cwd?: string | null; projectRoot?: string | null; draftId?: string; label?: string | null } = {}): RuntimePane {
   return {
     id,
     session: options.session ?? null,
@@ -84,6 +85,7 @@ function createRuntimePane(id: string, options: { session?: SessionInfo | null; 
     projectRoot: options.projectRoot ?? options.session?.projectRoot ?? null,
     draftId: options.draftId ?? id,
     revision: 0,
+    label: options.label ?? null,
   };
 }
 
@@ -477,38 +479,68 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (hasExplicitDeepLink) {
-      setPaneWorkspaceRestored(true);
-      return;
-    }
+    if (typeof window === "undefined") return;
     persistedPaneWorkspaceRef.current = parsePaneWorkspace(
       window.localStorage.getItem(PANE_WORKSPACE_STORAGE_KEY),
     );
-  }, [hasExplicitDeepLink]);
+  }, []);
 
   const sessionsMapRef = useRef<Map<string, SessionInfo>>(new Map());
 
   const handleSessionsChange = useCallback((sessions: SessionInfo[]) => {
     sessionsMapRef.current = new Map(sessions.map((session) => [session.id, session]));
     const saved = persistedPaneWorkspaceRef.current;
-    if (!saved || hasExplicitDeepLink) {
+    persistedPaneWorkspaceRef.current = null;
+    if (!saved) {
       setPaneWorkspaceRestored(true);
       return;
     }
-    persistedPaneWorkspaceRef.current = null;
     const sessionsById = new Map(sessions.map((session) => [session.id, session]));
     const restored = saved.panes.flatMap((descriptor) => {
       if (descriptor.sessionId) {
         const session = sessionsById.get(descriptor.sessionId);
-        return session ? [createRuntimePane(descriptor.id, { session, cwd: session.cwd, projectRoot: session.projectRoot ?? descriptor.projectRoot, draftId: descriptor.draftId })] : [];
+        return session ? [createRuntimePane(descriptor.id, {
+          session,
+          cwd: session.cwd,
+          projectRoot: session.projectRoot ?? descriptor.projectRoot,
+          draftId: descriptor.draftId,
+          label: descriptor.label,
+        })] : [];
       }
       return descriptor.cwd
-        ? [createRuntimePane(descriptor.id, { cwd: descriptor.cwd, projectRoot: descriptor.projectRoot, draftId: descriptor.draftId })]
+        ? [createRuntimePane(descriptor.id, {
+          cwd: descriptor.cwd,
+          projectRoot: descriptor.projectRoot,
+          draftId: descriptor.draftId,
+          label: descriptor.label,
+        })]
         : [];
     });
     if (restored.length > 0) {
-      const restoredFocusId = restored.some((pane) => pane.id === saved.focusedPaneId)
-        ? saved.focusedPaneId
+      let targetFocusId = saved.focusedPaneId;
+      if (initialNavigation.sessionId) {
+        const match = restored.find((p) => p.session?.id === initialNavigation.sessionId);
+        if (match) {
+          targetFocusId = match.id;
+        } else {
+          const deepLinkSession = sessionsById.get(initialNavigation.sessionId);
+          if (deepLinkSession) {
+            const targetIdx = restored.findIndex((p) => p.id === targetFocusId);
+            const idx = targetIdx >= 0 ? targetIdx : 0;
+            restored[idx] = createRuntimePane(restored[idx].id, {
+              session: deepLinkSession,
+              cwd: deepLinkSession.cwd,
+              projectRoot: deepLinkSession.projectRoot,
+              draftId: restored[idx].draftId,
+              label: restored[idx].label,
+            });
+            targetFocusId = restored[idx].id;
+          }
+        }
+      }
+
+      const restoredFocusId = restored.some((pane) => pane.id === targetFocusId)
+        ? targetFocusId
         : restored[0].id;
       const restoredFocus = restored.find((pane) => pane.id === restoredFocusId) ?? restored[0];
       setPanes(restored);
@@ -523,7 +555,7 @@ export function AppShell() {
         : "/", { scroll: false });
     }
     setPaneWorkspaceRestored(true);
-  }, [hasExplicitDeepLink, router]);
+  }, [router]);
 
   useEffect(() => {
     if (!paneWorkspaceRestored) return;
@@ -533,6 +565,7 @@ export function AppShell() {
       cwd: pane.session?.cwd ?? pane.cwd,
       projectRoot: pane.session?.projectRoot ?? pane.projectRoot,
       draftId: pane.draftId,
+      label: pane.label ?? null,
     }));
     state.focusedPaneId = panes.some((pane) => pane.id === focusedPaneId) ? focusedPaneId : panes[0].id;
     try {
