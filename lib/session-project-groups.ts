@@ -80,6 +80,7 @@ export function groupSessionsByProject(
   sessions: SessionInfo[],
   runningSessionIds: ReadonlySet<string>,
   unreadSessionIds: ReadonlySet<string>,
+  customOrder?: readonly string[],
 ): SessionProjectGroup[] {
   const byRoot = new Map<string, SessionInfo[]>();
   for (const session of sessions) {
@@ -90,7 +91,7 @@ export function groupSessionsByProject(
     else byRoot.set(root, [session]);
   }
 
-  return [...byRoot.entries()]
+  const groups = [...byRoot.entries()]
     .map(([root, projectSessions]) => ({
       root,
       sessions: projectSessions,
@@ -101,8 +102,17 @@ export function groupSessionsByProject(
       ),
       runningCount: projectSessions.filter((session) => runningSessionIds.has(session.id)).length,
       unreadCount: projectSessions.filter((session) => unreadSessionIds.has(session.id)).length,
-    }))
-    .sort((a, b) => {
+    }));
+
+  if (customOrder && customOrder.length > 0) {
+    const orderMap = new Map<string, number>();
+    customOrder.forEach((root, idx) => orderMap.set(root, idx));
+    return groups.sort((a, b) => {
+      const idxA = orderMap.get(a.root);
+      const idxB = orderMap.get(b.root);
+      if (idxA !== undefined && idxB !== undefined) return idxA - idxB;
+      if (idxA !== undefined) return -1;
+      if (idxB !== undefined) return 1;
       const aActive = a.runningCount > 0 ? 1 : 0;
       const bActive = b.runningCount > 0 ? 1 : 0;
       if (aActive !== bActive) return bActive - aActive;
@@ -111,6 +121,17 @@ export function groupSessionsByProject(
       if (aUnread !== bUnread) return bUnread - aUnread;
       return b.latestModified.localeCompare(a.latestModified);
     });
+  }
+
+  return groups.sort((a, b) => {
+    const aActive = a.runningCount > 0 ? 1 : 0;
+    const bActive = b.runningCount > 0 ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    const aUnread = a.unreadCount > 0 ? 1 : 0;
+    const bUnread = b.unreadCount > 0 ? 1 : 0;
+    if (aUnread !== bUnread) return bUnread - aUnread;
+    return b.latestModified.localeCompare(a.latestModified);
+  });
 }
 
 export function parseCollapsedProjectRoots(raw: string | null): Set<string> {

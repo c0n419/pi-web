@@ -894,9 +894,29 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     [projectActivity, selectedProject],
   );
 
+  const [projectOrder, setProjectOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem("pi-web:project-order");
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [dragOverProjectRoot, setDragOverProjectRoot] = useState<string | null>(null);
+
+  const saveProjectOrder = useCallback((order: string[]) => {
+    setProjectOrder(order);
+    try {
+      localStorage.setItem("pi-web:project-order", JSON.stringify(order));
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const projectGroups = useMemo(
-    () => groupSessionsByProject(allSessions, runningSessionIds, unreadSessionIds),
-    [allSessions, runningSessionIds, unreadSessionIds],
+    () => groupSessionsByProject(allSessions, runningSessionIds, unreadSessionIds, projectOrder),
+    [allSessions, runningSessionIds, unreadSessionIds, projectOrder],
   );
   const showWorktreeSwitcher = Boolean(
     worktreeState?.isGit
@@ -1699,9 +1719,43 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           const collapsed = collapsedProjectRoots.has(group.root);
           const color = projectColor(group.root);
           const isActiveProject = group.root === selectedProject;
+          const isDragOver = dragOverProjectRoot === group.root;
           return (
             <section key={group.root} aria-label={displayCwd(group.root, homeDir)}>
               <div
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/plain", JSON.stringify({ type: "pi-project", root: group.root }));
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverProjectRoot(group.root);
+                }}
+                onDragLeave={() => setDragOverProjectRoot(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverProjectRoot(null);
+                  try {
+                    const raw = e.dataTransfer.getData("text/plain");
+                    if (!raw) return;
+                    const data = JSON.parse(raw);
+                    if (data.type === "pi-project" && data.root && data.root !== group.root) {
+                      const allRoots = projectGroups.map((g) => g.root);
+                      const sourceIdx = allRoots.indexOf(data.root);
+                      const targetIdx = allRoots.indexOf(group.root);
+                      if (sourceIdx >= 0 && targetIdx >= 0) {
+                        const nextOrder = [...allRoots];
+                        const [moved] = nextOrder.splice(sourceIdx, 1);
+                        nextOrder.splice(targetIdx, 0, moved);
+                        saveProjectOrder(nextOrder);
+                      }
+                    }
+                  } catch {
+                    // ignore
+                  }
+                }}
                 style={{
                   position: "sticky",
                   top: 0,
@@ -1713,7 +1767,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   padding: "4px 8px 4px 9px",
                   borderLeft: `3px solid ${color}`,
                   borderBottom: "1px solid var(--border)",
-                  background: isActiveProject ? "var(--bg-selected)" : "var(--bg-panel)",
+                  background: isDragOver ? "color-mix(in srgb, var(--accent) 20%, var(--bg-panel))" : (isActiveProject ? "var(--bg-selected)" : "var(--bg-panel)"),
+                  cursor: "grab",
                 }}
               >
                 <button
@@ -2229,11 +2284,10 @@ function SessionItem({
       draggable={!renaming && !confirmDelete && !session.transient}
       onDragStart={(e) => {
         if (renaming || confirmDelete || session.transient) return;
-        e.dataTransfer.setData("application/json", JSON.stringify({
+        e.dataTransfer.setData("text/plain", JSON.stringify({
           type: "pi-session",
-          session,
+          sessionId: session.id,
         }));
-        e.dataTransfer.setData("text/plain", session.id);
         e.dataTransfer.effectAllowed = "copy";
       }}
       onClick={confirmDelete || renaming ? undefined : onClick}

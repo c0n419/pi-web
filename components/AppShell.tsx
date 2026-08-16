@@ -486,7 +486,10 @@ export function AppShell() {
     );
   }, [hasExplicitDeepLink]);
 
+  const sessionsMapRef = useRef<Map<string, SessionInfo>>(new Map());
+
   const handleSessionsChange = useCallback((sessions: SessionInfo[]) => {
+    sessionsMapRef.current = new Map(sessions.map((session) => [session.id, session]));
     const saved = persistedPaneWorkspaceRef.current;
     if (!saved || hasExplicitDeepLink) {
       setPaneWorkspaceRestored(true);
@@ -1228,6 +1231,15 @@ export function AppShell() {
   }, []);
 
   const handleSelectSessionForPane = useCallback((targetPaneId: string, session: SessionInfo) => {
+    setPanes((current) => current.map((pane) => pane.id === targetPaneId
+      ? { ...pane, session, cwd: session.cwd, projectRoot: session.projectRoot ?? null, revision: pane.revision + 1 }
+      : pane));
+    setFocusedPaneId(targetPaneId);
+  }, []);
+
+  const handleSelectSessionIdForPane = useCallback((targetPaneId: string, sessionId: string) => {
+    const session = sessionsMapRef.current.get(sessionId);
+    if (!session) return;
     setPanes((current) => current.map((pane) => pane.id === targetPaneId
       ? { ...pane, session, cwd: session.cwd, projectRoot: session.projectRoot ?? null, revision: pane.revision + 1 }
       : pane));
@@ -2515,6 +2527,7 @@ export function AppShell() {
           onClosePane={handleClosePane}
           onSwapPanes={handleSwapPanes}
           onSelectSessionForPane={handleSelectSessionForPane}
+          onSelectSessionIdForPane={handleSelectSessionIdForPane}
           onSetPaneLabel={handleSetPaneLabel}
           onPaneCwdChange={handlePaneCwdChange}
           onPaneAgentEnd={handlePaneAgentEnd}

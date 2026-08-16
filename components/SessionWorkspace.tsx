@@ -38,6 +38,7 @@ interface Props {
   onClosePane: (paneId: string) => void;
   onSwapPanes?: (paneIdA: string, paneIdB: string) => void;
   onSelectSessionForPane?: (paneId: string, session: SessionInfo) => void;
+  onSelectSessionIdForPane?: (paneId: string, sessionId: string) => void;
   onSetPaneLabel?: (paneId: string, label: string | null) => void;
   onPaneCwdChange?: (paneId: string, cwd: string) => void;
   onPaneAgentEnd: (paneId: string) => void;
@@ -64,7 +65,7 @@ function paneTitle(pane: WorkspaceRuntimePane, index: number, unsaved: string): 
 export function SessionWorkspace({
   panes, focusedPaneId, runningSessionIds, isMobile, maxPanes, modelsRefreshKey, activeCwd,
   focusedChatInputRef, soundEnabled, onSoundToggle, playDoneSound, unlockAudio,
-  onFocusPane, onAddPane, onClosePane, onSwapPanes, onSelectSessionForPane, onSetPaneLabel,
+  onFocusPane, onAddPane, onClosePane, onSwapPanes, onSelectSessionForPane, onSelectSessionIdForPane, onSetPaneLabel,
   onPaneCwdChange, onPaneAgentEnd, onPaneAttentionNeeded,
   onPaneSessionCreated, onPaneSessionForked, onFocusedBranchDataChange,
   onFocusedSystemPromptChange, onFocusedSystemPromptLoaderChange,
@@ -169,7 +170,7 @@ export function SessionWorkspace({
 
   // Drag & Drop Handlers
   const handleTabDragStart = (e: React.DragEvent, paneId: string) => {
-    e.dataTransfer.setData("application/json", JSON.stringify({ type: "pane-tab", paneId }));
+    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "pane-tab", paneId }));
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -190,13 +191,18 @@ export function SessionWorkspace({
     setDragOverTabId(null);
     setDragOverPaneId(null);
     try {
-      const raw = e.dataTransfer.getData("application/json");
+      const raw = e.dataTransfer.getData("text/plain");
       if (!raw) return;
       const data = JSON.parse(raw);
       if (data.type === "pane-tab" && data.paneId) {
         onSwapPanes?.(data.paneId, targetPaneId);
-      } else if (data.type === "pi-session" && data.session) {
-        onSelectSessionForPane?.(targetPaneId, data.session);
+      } else if (data.type === "pi-session" && (data.sessionId || data.session?.id)) {
+        const sessionId = data.sessionId || data.session?.id;
+        if (sessionId && onSelectSessionIdForPane) {
+          onSelectSessionIdForPane(targetPaneId, sessionId);
+        } else if (data.session && onSelectSessionForPane) {
+          onSelectSessionForPane(targetPaneId, data.session);
+        }
       }
     } catch {
       // ignore invalid drop payload
