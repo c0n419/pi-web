@@ -32,19 +32,19 @@ test("closes the mobile action layer on outside click, Escape, and session chang
 
 test("keeps the mobile action layer open after using an expanded action", () => {
   const toggleTopPanel = source.match(/const toggleTopPanel = useCallback\([\s\S]*?\n  \}, \[isMobile\]\);/)?.[0];
-  const themeHandler = source.match(/const renderThemeButton =[\s\S]*?onClick=\{\(event\) => \{[\s\S]*?toggleTheme\([\s\S]*?\n      \}\}/)?.[0];
+  const themeHandler = source.match(/const renderThemeButton =[\s\S]*?onClick=\{\(\) => toggleTopPanel\("theme", mobile\)\}/)?.[0];
   const historyHandler = source.match(/onClick=\{\(\) => \{[\s\S]*?handleViewFullHistory\(\);[\s\S]*?\n          \}\}/)?.[0];
   const autoNameHandler = source.match(/onClick=\{\(\) => \{[\s\S]*?void handleAutoName\(\);[\s\S]*?\n              \}\}/)?.[0];
 
   for (const handler of [toggleTopPanel, themeHandler, historyHandler, autoNameHandler]) {
     assert.ok(handler);
     assert.doesNotMatch(handler, /setMobileToolbarMoreOpen\(false\)/);
-    assert.match(handler, /setMobileToolbarMoreOpen\(true\)/);
   }
 
   assert.match(source, /toggleTopPanel\("branches", true\)/);
   assert.match(source, /handleSystemPromptToggle\(mobile\)/);
   assert.match(source, /toggleTopPanel\("language", mobile\)/);
+  assert.match(source, /toggleTopPanel\("theme", mobile\)/);
   assert.match(source, /onClick=\{\(\) => toggleTopPanel\("session"\)\}/);
 });
 

@@ -52,6 +52,138 @@ html.dark {
   --bg-subtle: rgba(255,255,255,0.04);
 }
 
+/* --- Catppuccin Mocha (Dark) --- */
+html[data-theme="catppuccin-mocha"],
+html.dark[data-theme="catppuccin-mocha"] {
+  --bg: #1e1e2e;
+  --bg-panel: #181825;
+  --bg-hover: #313244;
+  --bg-selected: #45475a;
+  --border: #313244;
+  --text: #cdd6f4;
+  --text-muted: #a6adc8;
+  --text-dim: #9399b2;
+  --accent: #89b4fa;
+  --accent-hover: #b4befe;
+  --user-bg: #313244;
+  --assistant-bg: #1e1e2e;
+  --tool-bg: #181825;
+  --bg-subtle: rgba(205, 214, 244, 0.05);
+}
+
+/* --- Catppuccin Macchiato (Dark Medium) --- */
+html[data-theme="catppuccin-macchiato"],
+html.dark[data-theme="catppuccin-macchiato"] {
+  --bg: #24273a;
+  --bg-panel: #1e2030;
+  --bg-hover: #363a4f;
+  --bg-selected: #494d64;
+  --border: #363a4f;
+  --text: #cad3f5;
+  --text-muted: #a5adcb;
+  --text-dim: #939ab7;
+  --accent: #8aadf4;
+  --accent-hover: #b7bdf8;
+  --user-bg: #363a4f;
+  --assistant-bg: #24273a;
+  --tool-bg: #1e2030;
+  --bg-subtle: rgba(202, 211, 245, 0.05);
+}
+
+/* --- Catppuccin Frappé (Dark Soft) --- */
+html[data-theme="catppuccin-frappe"],
+html.dark[data-theme="catppuccin-frappe"] {
+  --bg: #303446;
+  --bg-panel: #292c3c;
+  --bg-hover: #414559;
+  --bg-selected: #51576d;
+  --border: #414559;
+  --text: #c6d0f5;
+  --text-muted: #a5adce;
+  --text-dim: #949cbb;
+  --accent: #8caaee;
+  --accent-hover: #babbf6;
+  --user-bg: #414559;
+  --assistant-bg: #303446;
+  --tool-bg: #292c3c;
+  --bg-subtle: rgba(198, 208, 245, 0.05);
+}
+
+/* --- Catppuccin Latte (Light) --- */
+html[data-theme="catppuccin-latte"] {
+  --bg: #eff1f5;
+  --bg-panel: #e6e9ef;
+  --bg-hover: #ccd0da;
+  --bg-selected: #bcc0cc;
+  --border: #ccd0da;
+  --text: #4c4f69;
+  --text-muted: #5c5f77;
+  --text-dim: #6c6f85;
+  --accent: #1e66f5;
+  --accent-hover: #7287fd;
+  --user-bg: #e6e9ef;
+  --assistant-bg: #eff1f5;
+  --tool-bg: #dce0e8;
+  --bg-subtle: rgba(76, 79, 105, 0.05);
+}
+
+/* --- Tokyo Night --- */
+html[data-theme="tokyo-night"],
+html.dark[data-theme="tokyo-night"] {
+  --bg: #1a1b26;
+  --bg-panel: #16161e;
+  --bg-hover: #292e42;
+  --bg-selected: #3b4261;
+  --border: #292e42;
+  --text: #c0caf5;
+  --text-muted: #9aa5ce;
+  --text-dim: #565f89;
+  --accent: #7aa2f7;
+  --accent-hover: #bb9af7;
+  --user-bg: #24283b;
+  --assistant-bg: #1a1b26;
+  --tool-bg: #16161e;
+  --bg-subtle: rgba(192, 202, 245, 0.05);
+}
+
+/* --- Dracula --- */
+html[data-theme="dracula"],
+html.dark[data-theme="dracula"] {
+  --bg: #282a36;
+  --bg-panel: #21222c;
+  --bg-hover: #44475a;
+  --bg-selected: #6272a4;
+  --border: #44475a;
+  --text: #f8f8f2;
+  --text-muted: #bd93f9;
+  --text-dim: #6272a4;
+  --accent: #bd93f9;
+  --accent-hover: #ff79c6;
+  --user-bg: #44475a;
+  --assistant-bg: #282a36;
+  --tool-bg: #21222c;
+  --bg-subtle: rgba(248, 248, 242, 0.05);
+}
+
+/* --- Nord --- */
+html[data-theme="nord"],
+html.dark[data-theme="nord"] {
+  --bg: #2e3440;
+  --bg-panel: #272c36;
+  --bg-hover: #3b4252;
+  --bg-selected: #434c5e;
+  --border: #3b4252;
+  --text: #eceff4;
+  --text-muted: #d8dee9;
+  --text-dim: #4c566a;
+  --accent: #88c0d0;
+  --accent-hover: #81a1c1;
+  --user-bg: #3b4252;
+  --assistant-bg: #2e3440;
+  --tool-bg: #272c36;
+  --bg-subtle: rgba(236, 239, 244, 0.05);
+}
+
 .catppuccin-file-icon {
   display: block;
   flex-shrink: 0;
