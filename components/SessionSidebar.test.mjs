@@ -30,17 +30,6 @@ test("exposes the polled running-session set to the shell", () => {
   assert.match(source, /onRunningSessionIdsChange\?\.\(runningSessionIds\)/);
 });
 
-test("includes project activity counts in accessible labels", () => {
-  assert.match(
-    source,
-    /aria-label=\{`\$\{t\("sidebar\.agentRunning"\)\} \(\$\{activity\.running\}\)`\}/,
-  );
-  assert.match(
-    source,
-    /aria-label=\{`\$\{t\("sidebar\.newSessionActivity"\)\} \(\$\{activity\.unread\}\)`\}/,
-  );
-});
-
 test("does not persist an unchanged fallback title ending in whitespace", () => {
   assert.match(
     sessionItemSource,
@@ -67,4 +56,20 @@ test("manual and lifecycle refreshes bypass the server session-list cache", () =
 test("does not expose disk-backed actions for transient sessions", () => {
   assert.match(sessionItemSource, /if \(session\.transient\) return;/);
   assert.match(sessionItemSource, /\{hovered && !session\.transient && \(/);
+});
+
+test("flat session rows support persistent drag reordering", () => {
+  assert.match(source, /SESSION_ORDER_STORAGE_KEY/);
+  assert.match(source, /saveSessionOrder/);
+  assert.match(source, /onReorderSession=\{/);
+  assert.match(sessionItemSource, /onDragOver=\{/);
+  assert.match(sessionItemSource, /onDrop=\{/);
+  assert.match(sessionItemSource, /onDragEnd=\{/);
+});
+
+test("moves the session receiving the latest user input to the top", () => {
+  assert.match(source, /SESSION_INPUT_EVENT/);
+  assert.match(source, /addEventListener\(SESSION_INPUT_EVENT, handleSessionInput\)/);
+  assert.match(source, /prioritizeSession\(event\.detail\.sessionId\)/);
+  assert.match(source, /const next = \[sessionId, \.\.\.previous\.filter\(\(id\) => id !== sessionId\)\]/);
 });

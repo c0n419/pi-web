@@ -11,6 +11,13 @@ try {
   piVersion = (JSON.parse(readFileSync(piPkgPath, "utf8")) as { version: string }).version;
 } catch { /* package not found, use default */ }
 
+const devOrigins = [
+  process.env.PI_WEB_HOSTNAME,
+  ...(process.env.PI_WEB_ALLOWED_HOSTS?.split(",") ?? []),
+]
+  .map((value) => value?.trim())
+  .filter((value): value is string => Boolean(value));
+
 const nextConfig: NextConfig = {
   outputFileTracingRoot: configDir,
   serverExternalPackages: [
@@ -20,7 +27,12 @@ const nextConfig: NextConfig = {
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
   ],
-  allowedDevOrigins: ["127.0.0.1", "192.168.*.*"],
+  // Next only serves dev resources (/_next/webpack-hmr, HMR chunks) to trusted
+  // origins, and its patterns do not match a leading "*." wildcard label. Reuse
+  // the operator's own host allow-list (PI_WEB_HOSTNAME / PI_WEB_ALLOWED_HOSTS,
+  // see lib/request-security.ts) so a reverse-proxied dev server — e.g.
+  // `tailscale serve` in front of a *.ts.net name — keeps working.
+  allowedDevOrigins: ["127.0.0.1", "192.168.*.*", "100.*.*.*", ...devOrigins],
   async headers() {
     return [
       {

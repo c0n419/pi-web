@@ -580,9 +580,108 @@ export function ChatWindow({ session, sessionRunning, isFocused = true, newSessi
     ? (modelThinkingLevelMaps[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
 
+  // Working-directory picker for a brand-new session. Rendered inside the
+  // composer's bottom bar (see ChatInput's `leadingControl`) so it lines up with
+  // the model / thinking / tools chips instead of sitting in its own wide block.
+  const workingDirControl = isEmptyNew && onNewSessionCwdChange ? (
+    <div ref={cwdMenuRef} style={{ position: "relative", flexShrink: 0, minWidth: 0 }}>
+      <button
+        type="button"
+        onClick={() => setCwdMenuOpen((v) => !v)}
+        title={`${t("panes.workingDirectory")}: ${displayCwd(messageCwd ?? newSessionCwd ?? homeDir ?? "", homeDir)}`}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          height: 32, maxWidth: isMobile ? 150 : 230, padding: "0 10px",
+          background: cwdMenuOpen ? "var(--bg-hover)" : "none",
+          border: "none", borderRadius: 9,
+          color: "var(--text-muted)", cursor: "pointer", fontSize: 12,
+          overflow: "hidden",
+          transition: "background 0.12s, color 0.12s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "var(--bg-hover)";
+          e.currentTarget.style.color = "var(--text)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = cwdMenuOpen ? "var(--bg-hover)" : "none";
+          e.currentTarget.style.color = "var(--text-muted)";
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }} aria-hidden="true">
+          <path d="M1.5 3h4l1.5 2h7.5v7.5h-13z" />
+        </svg>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, fontFamily: "var(--font-mono)" }}>
+          {displayCwd(messageCwd ?? newSessionCwd ?? homeDir ?? "", homeDir)}
+        </span>
+      </button>
+      {cwdMenuOpen && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 6px)",
+            left: 0,
+            zIndex: 100,
+            minWidth: 240,
+            maxWidth: "min(360px, calc(100vw - 32px))",
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            padding: "4px 0",
+          }}
+        >
+          <div style={{ padding: "6px 10px 4px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase" }}>
+            {t("panes.workingDirectory")}
+          </div>
+          {recentProjects.map((proj) => (
+            <button
+              key={proj}
+              onClick={() => {
+                setCwdMenuOpen(false);
+                onNewSessionCwdChange?.(proj);
+              }}
+              style={{
+                width: "100%", textAlign: "left", padding: "6px 10px", fontSize: 11,
+                background: "none", border: "none", color: "var(--text)", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: projectColor(proj), flexShrink: 0 }} />
+              <span style={{ fontFamily: "var(--font-mono)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {displayCwd(proj, homeDir)}
+              </span>
+            </button>
+          ))}
+          <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+          <button
+            onClick={() => {
+              setCwdMenuOpen(false);
+              setPickerOpen(true);
+            }}
+            style={{
+              width: "100%", textAlign: "left", padding: "6px 10px", fontSize: 11,
+              background: "none", border: "none", color: "var(--accent)", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 6, fontWeight: 500,
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <path d="M1.5 3h4l1.5 2h7.5v7.5h-13z" />
+            </svg>
+            {t("sidebar.selectDirectoryForNewSession")}
+          </button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   const chatInputElement = (
     <ChatInput
       ref={chatInputRef}
+      leadingControl={workingDirControl}
       onSend={handleSend}
       onAbort={handleAbort}
       onSteer={agentRunning ? handleSteer : undefined}
@@ -726,110 +825,6 @@ export function ChatWindow({ session, sessionRunning, isFocused = true, newSessi
             </div>
             <NoticeShelf notices={notices} align="right" />
             
-            {/* Working Directory Selector for new sessions */}
-            <div style={{ position: "relative", marginBottom: 12 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  background: "var(--bg-panel)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: "8px 12px",
-                  gap: 8,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" strokeWidth="1.4">
-                    <path d="M1.5 3h4l1.5 2h7.5v7.5h-13z" />
-                  </svg>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, flexShrink: 0 }}>
-                    {t("panes.workingDirectory")}:
-                  </span>
-                  <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {displayCwd(messageCwd ?? newSessionCwd ?? homeDir ?? "", homeDir)}
-                  </span>
-                </div>
-                {onNewSessionCwdChange && (
-                  <button
-                    type="button"
-                    onClick={() => setCwdMenuOpen((v) => !v)}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 4,
-                      background: "var(--bg-hover)", border: "1px solid var(--border)",
-                      borderRadius: 6, padding: "4px 8px", fontSize: 11,
-                      color: "var(--accent)", cursor: "pointer", fontWeight: 500, flexShrink: 0,
-                    }}
-                  >
-                    {t("panes.changeDirectory")} ▾
-                  </button>
-                )}
-              </div>
-
-              {cwdMenuOpen && (
-                <div
-                  ref={cwdMenuRef}
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 4px)",
-                    left: 0,
-                    right: 0,
-                    zIndex: 100,
-                    background: "var(--bg)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-                    padding: "4px 0",
-                  }}
-                >
-                  <div style={{ padding: "6px 10px 4px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase" }}>
-                    {t("sidebar.filterProjects")}
-                  </div>
-                  {recentProjects.map((proj) => (
-                    <button
-                      key={proj}
-                      onClick={() => {
-                        setCwdMenuOpen(false);
-                        onNewSessionCwdChange?.(proj);
-                      }}
-                      style={{
-                        width: "100%", textAlign: "left", padding: "6px 10px", fontSize: 11,
-                        background: "none", border: "none", color: "var(--text)", cursor: "pointer",
-                        display: "flex", alignItems: "center", gap: 6,
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
-                    >
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: projectColor(proj), flexShrink: 0 }} />
-                      <span style={{ fontFamily: "var(--font-mono)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {displayCwd(proj, homeDir)}
-                      </span>
-                    </button>
-                  ))}
-                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <button
-                    onClick={() => {
-                      setCwdMenuOpen(false);
-                      setPickerOpen(true);
-                    }}
-                    style={{
-                      width: "100%", textAlign: "left", padding: "6px 10px", fontSize: 11,
-                      background: "none", border: "none", color: "var(--accent)", cursor: "pointer",
-                      display: "flex", alignItems: "center", gap: 6, fontWeight: 500,
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-                      <path d="M1.5 3h4l1.5 2h7.5v7.5h-13z" />
-                    </svg>
-                    {t("sidebar.selectDirectoryForNewSession")}
-                  </button>
-                </div>
-              )}
-            </div>
-
             {pickerOpen && (
               <DirectoryPicker
                 onSelect={(path) => {

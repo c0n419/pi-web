@@ -99,6 +99,26 @@ test("opening System lazily starts a dormant session without sending a prompt", 
   );
 });
 
+test("accepted user inputs announce their session for sidebar prioritization", () => {
+  const sendSource = source.slice(
+    source.indexOf("  const handleSend = useCallback"),
+    source.indexOf("  const executeBash = useCallback"),
+  );
+  const bashSource = source.slice(
+    source.indexOf("  const executeBash = useCallback"),
+    source.indexOf("  executeBashRef.current = executeBash"),
+  );
+  const streamingSource = source.slice(
+    source.indexOf("  const sendStreamingPrompt = useCallback"),
+    source.indexOf("  const handleSteer = useCallback"),
+  );
+
+  assert.match(source, /import \{ announceSessionInput \} from "@\/lib\/session-input-event"/);
+  assert.match(sendSource, /announceSessionInput\(sentSessionId\)/);
+  assert.match(bashSource, /announceSessionInput\(sid\)/);
+  assert.match(streamingSource, /announceSessionInput\(sid\)/);
+});
+
 test("new-session promotion rekeys drafts before publishing the real session", () => {
   const promoteSource = source.slice(
     source.indexOf("  const promoteNewSession = useCallback"),

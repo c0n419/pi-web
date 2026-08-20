@@ -21,7 +21,7 @@ import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
-import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
+import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
   claimExtensionAttentionNotification,
   shouldShowBrowserNotification,
@@ -38,6 +38,7 @@ import {
   parsePaneWorkspace,
   removeSessionFromWorkspace,
   serializePaneWorkspace,
+  type PaneLayoutPreset,
   type PaneWorkspaceState,
 } from "@/lib/session-pane-workspace";
 import {
@@ -65,6 +66,8 @@ type AutoNameStatus =
   | { kind: "error"; message: string };
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
+const PANE_LAYOUT_PRESET_STORAGE_KEY = "pi-web:pane-layout-preset";
+const PANE_LAYOUT_PRESETS: PaneLayoutPreset[] = ["auto", "1x1", "1+2", "2x1", "2x2"];
 const LANGUAGE_MENU_WIDTH = 176;
 
 interface RuntimePane {
@@ -168,6 +171,42 @@ export function AppShell() {
   const [initialCwdError, setInitialCwdError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
+  // Pane layout / broadcast now live in the shell top bar beside Branches and
+  // System, so the workspace tab strip stays a pure session switcher.
+  const [paneLayoutPreset, setPaneLayoutPreset] = useState<PaneLayoutPreset>(() => {
+    if (typeof window === "undefined") return "auto";
+    const saved = localStorage.getItem(PANE_LAYOUT_PRESET_STORAGE_KEY);
+    const valid: PaneLayoutPreset[] = ["auto", "1x1", "1+2", "2x1", "2x2"];
+    return valid.includes(saved as PaneLayoutPreset) ? (saved as PaneLayoutPreset) : "auto";
+  });
+  const [broadcastActive, setBroadcastActive] = useState(false);
+  const [paneLayoutMenuOpen, setPaneLayoutMenuOpen] = useState(false);
+  const paneLayoutMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!paneLayoutMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (paneLayoutMenuRef.current?.contains(event.target as Node)) return;
+      setPaneLayoutMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPaneLayoutMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [paneLayoutMenuOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANE_LAYOUT_PRESET_STORAGE_KEY, paneLayoutPreset);
+    } catch {
+      // ignore storage quota / privacy-mode errors
+    }
+  }, [paneLayoutPreset]);
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
@@ -447,12 +486,6 @@ export function AppShell() {
   // read tool resolves it the same way (it strips the @ prefix).
   const handleAtMention = useCallback((relativePath: string, isDir: boolean) => {
     chatInputRef.current?.insertText(buildAtMentionText(relativePath, isDir));
-    if (isMobile) { setRightPanelOpen(false); setSidebarOpen(false); }
-  }, [isMobile]);
-
-  const handleAtMentions = useCallback((relativePaths: string[]) => {
-    const mentions = buildFileAtMentionsText(relativePaths);
-    if (mentions) chatInputRef.current?.insertText(mentions);
     if (isMobile) { setRightPanelOpen(false); setSidebarOpen(false); }
   }, [isMobile]);
 
@@ -985,10 +1018,6 @@ export function AppShell() {
     setAutoNameStatus({ kind: "idle" });
   }, [selectedSession?.id]);
 
-  const handleExplorerRefresh = useCallback(() => {
-    setExplorerRefreshKey((k) => k + 1);
-  }, []);
-
   const handlePaneSessionForked = useCallback((
     paneId: string,
     expectedRevision: number,
@@ -1401,11 +1430,6 @@ export function AppShell() {
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
-        onOpenFile={handleOpenFile}
-        explorerRefreshKey={explorerRefreshKey}
-        onExplorerRefresh={handleExplorerRefresh}
-        onAtMention={handleAtMention}
-        onAtMentions={handleAtMentions}
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onSessionsChange={handleSessionsChange}
@@ -1994,6 +2018,120 @@ export function AppShell() {
     );
   };
 
+  /** Pane layout preset + broadcast toggle, rendered in the shell top bar next
+   *  to Branches and System instead of the workspace tab strip. */
+  const renderPaneWorkspaceControls = (mobile: boolean) => {
+    if (mobile || !showChat) return null;
+    const layoutLabels: Record<PaneLayoutPreset, string> = {
+      "auto": translate("panes.layoutAuto"),
+      "1x1": translate("panes.layout1x1"),
+      "1+2": translate("panes.layout1plus2"),
+      "2x1": translate("panes.layout2x1"),
+      "2x2": translate("panes.layout2x2"),
+    };
+    const layoutActive = paneLayoutPreset !== "auto";
+
+    return (
+      <>
+        <div ref={paneLayoutMenuRef} style={{ position: "relative", display: "flex", alignItems: "stretch" }}>
+          <button
+            type="button"
+            onClick={() => setPaneLayoutMenuOpen((open) => !open)}
+            title={translate("panes.layout")}
+            aria-label={translate("panes.layout")}
+            aria-expanded={paneLayoutMenuOpen}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              height: "100%", padding: "0 12px",
+              background: paneLayoutMenuOpen ? "var(--bg-selected)" : "none",
+              border: "none",
+              borderTop: paneLayoutMenuOpen ? "2px solid var(--accent)" : "2px solid transparent",
+              borderRight: "1px solid var(--border)",
+              color: paneLayoutMenuOpen || layoutActive ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer", flexShrink: 0,
+              fontSize: 11, whiteSpace: "nowrap",
+              transition: "color 0.1s, background 0.1s",
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.color = paneLayoutMenuOpen || layoutActive ? "var(--text)" : "var(--text-muted)";
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: layoutActive ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="12" y1="3" x2="12" y2="21" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+            </svg>
+            <span>{translate("panes.layout")}: {layoutLabels[paneLayoutPreset]}</span>
+          </button>
+          {paneLayoutMenuOpen && (
+            <div
+              style={{
+                position: "absolute", top: "100%", left: 0, zIndex: 120,
+                minWidth: 170, marginTop: 2, padding: 4,
+                background: "var(--bg-panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+                display: "flex", flexDirection: "column",
+              }}
+            >
+              {PANE_LAYOUT_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => {
+                    setPaneLayoutPreset(preset);
+                    setPaneLayoutMenuOpen(false);
+                  }}
+                  style={{
+                    padding: "6px 10px", fontSize: 11, textAlign: "left",
+                    border: "none", borderRadius: 5,
+                    background: paneLayoutPreset === preset ? "var(--bg-selected)" : "transparent",
+                    color: paneLayoutPreset === preset ? "var(--accent)" : "var(--text)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {layoutLabels[preset]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setBroadcastActive((active) => !active)}
+          title={translate("panes.broadcastTitle")}
+          aria-label={translate("panes.broadcast")}
+          aria-pressed={broadcastActive}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            height: "100%", padding: "0 12px",
+            background: broadcastActive ? "var(--bg-selected)" : "none",
+            border: "none",
+            borderTop: broadcastActive ? "2px solid var(--accent)" : "2px solid transparent",
+            borderRight: "1px solid var(--border)",
+            color: broadcastActive ? "var(--text)" : "var(--text-muted)",
+            cursor: "pointer", flexShrink: 0,
+            fontSize: 11, whiteSpace: "nowrap",
+            transition: "color 0.1s, background 0.1s",
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.color = broadcastActive ? "var(--text)" : "var(--text-muted)";
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: broadcastActive ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
+            <path d="m3 11 18-5v12L3 13v-2z" />
+            <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+          </svg>
+          <span>{translate("panes.broadcast")}</span>
+        </button>
+      </>
+    );
+  };
+
   const renderMainFileToggle = (mobile: boolean) => {
     const covered = mobile && mobileToolbarMoreOpen;
     return (
@@ -2271,6 +2409,7 @@ export function AppShell() {
               {renderLanguageButton(false)}
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
+              {renderPaneWorkspaceControls(false)}
               {renderSessionStatsButton(false)}
             </>
           )}
@@ -2687,6 +2826,9 @@ export function AppShell() {
           modelsRefreshKey={modelsRefreshKey}
           activeCwd={activeCwd}
           focusedChatInputRef={chatInputRef}
+          layoutPreset={paneLayoutPreset}
+          isBroadcastActive={broadcastActive}
+          onBroadcastActiveChange={setBroadcastActive}
           soundEnabled={soundEnabled}
           onSoundToggle={onSoundToggle}
           playDoneSound={playDoneSound}

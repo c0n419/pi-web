@@ -19,6 +19,7 @@ import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-prese
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
+import { announceSessionInput } from "@/lib/session-input-event";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
@@ -1311,6 +1312,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       } else {
         throw new Error("No active session for the prompt");
       }
+      if (sentSessionId) announceSessionInput(sentSessionId);
       if (isSlashCommandPrompt && sentSessionId) {
         void waitForPromptSettlement(sentSessionId, promptRunId);
       }
@@ -1363,6 +1365,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         command,
         excludeFromContext,
       });
+      announceSessionInput(sid);
       await loadSession(sid);
       promoteNewSession(1, inputText);
     } catch (e) {
@@ -1633,6 +1636,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         streamingBehavior: behavior,
         ...(piImages?.length ? { images: piImages } : {}),
       });
+      announceSessionInput(sid);
     } catch (e) {
       console.error("Failed to submit streaming prompt:", e);
       // A transport failure after dispatch is ambiguous: the server may have

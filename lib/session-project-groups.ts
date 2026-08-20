@@ -29,6 +29,26 @@ export function projectRootOf(session: SessionInfo): string {
   return session.projectRoot ?? session.cwd;
 }
 
+/**
+ * Short, human-facing project label: the final path segment only ('pi-web'
+ * rather than '~/pi-web'). Falls back to the full root for degenerate paths
+ * such as '/' or a bare '~' so the header is never empty.
+ */
+export function projectDisplayName(root: string): string {
+  const trimmed = root.replace(/\/+$/, "");
+  const segment = trimmed.slice(trimmed.lastIndexOf("/") + 1);
+  return segment || trimmed || root;
+}
+
+/**
+ * Subagent worker sessions are named `subagent-worker-<id>-<n>` by pi. They are
+ * useful while a run is live but become noise once it finishes, so the sidebar
+ * hides completed ones behind a per-project toggle.
+ */
+export function isSubagentSession(session: SessionInfo): boolean {
+  return /^subagent-worker-[0-9a-f]+-\d+$/i.test(session.name ?? "");
+}
+
 export function projectColor(root: string): string {
   let hash = 2166136261;
   for (let index = 0; index < root.length; index++) {

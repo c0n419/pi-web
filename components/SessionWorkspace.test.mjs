@@ -65,3 +65,33 @@ test("supports focus mode maximize toggle, layout presets, broadcast mode, hando
   assert.match(css, /\.session-workspace-grid\.layout-preset-1plus2/);
   assert.match(css, /\.broadcast-bar/);
 });
+
+test("layout and broadcast controls live in the shell top bar beside branches and system", () => {
+  // The workspace consumes them as props; the pane tab strip no longer owns them.
+  assert.match(source, /layoutPreset: PaneLayoutPreset;/);
+  assert.match(source, /isBroadcastActive: boolean;/);
+  assert.match(source, /onBroadcastActiveChange: \(active: boolean\) => void;/);
+  assert.doesNotMatch(source, /workspace-controls-group/);
+  assert.doesNotMatch(source, /setLayoutMenuOpen/);
+
+  assert.match(appShell, /PANE_LAYOUT_PRESET_STORAGE_KEY/);
+  assert.match(appShell, /const \[paneLayoutPreset, setPaneLayoutPreset\]/);
+  assert.match(appShell, /const \[broadcastActive, setBroadcastActive\]/);
+  assert.match(appShell, /renderPaneWorkspaceControls/);
+  assert.match(appShell, /setPaneLayoutPreset\(preset\)/);
+  assert.match(appShell, /layoutPreset=\{paneLayoutPreset\}/);
+  assert.match(appShell, /isBroadcastActive=\{broadcastActive\}/);
+});
+
+test("sidebar drops the file explorer, project directory picker, and repo-root guide", () => {
+  assert.doesNotMatch(sidebar, /<FileExplorer/);
+  assert.doesNotMatch(sidebar, /files\.explorer/);
+  assert.doesNotMatch(sidebar, /explorerOpen/);
+  assert.doesNotMatch(sidebar, /inactiveWorktreeSelector/);
+  assert.doesNotMatch(sidebar, /sidebar\.gitRepoRootOnly/);
+  assert.doesNotMatch(sidebar, /sidebar\.openRepoRoot/);
+  // The project dropdown button is gone; project switching stays in the new-session menu.
+  assert.doesNotMatch(sidebar, /setDropdownOpen/);
+  // Worktree switching itself must survive.
+  assert.match(sidebar, /showWorktreeSwitcher/);
+});

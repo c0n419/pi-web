@@ -1560,7 +1560,6 @@ span.linenumber {
 .active-session-add:disabled { cursor: not-allowed; opacity: 0.4; }
 
 /* Workspace Toolbar Controls (Layout & Broadcast) */
-.workspace-controls-group { display: flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; border-left: 1px solid var(--border); }
 .workspace-tool-btn { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .workspace-tool-btn:hover { color: var(--text); background: var(--bg-hover); border-color: var(--text-dim); }
 .workspace-tool-btn.is-active { background: color-mix(in srgb, var(--accent) 15%, var(--bg)); color: var(--accent); border-color: var(--accent); }
@@ -1600,6 +1599,26 @@ span.linenumber {
 .session-pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); outline: 1px solid transparent; outline-offset: -2px; }
 .session-pane.is-focused { outline-color: color-mix(in srgb, var(--accent) 65%, transparent); z-index: 1; }
 .session-pane.is-drag-over { outline-color: var(--accent); outline-width: 2px; }
+
+/* Session switch: a restrained fade + 4px lift makes content replacement feel
+   continuous without slowing navigation or animating the scroll container. */
+.session-pane-content {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  animation: session-pane-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
+@keyframes session-pane-enter {
+  from { opacity: 0.25; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-pane-content { animation: none; }
+}
 @media (max-width: 640px) {
   .active-session-strip { min-height: 44px; padding-left: max(5px, env(safe-area-inset-left)); padding-right: max(5px, env(safe-area-inset-right)); }
   .active-session-tab { min-width: 132px; }

@@ -29,6 +29,11 @@ interface Props {
   modelsRefreshKey: number;
   activeCwd?: string | null;
   focusedChatInputRef: RefObject<ChatInputHandle | null>;
+  /** Layout preset and broadcast mode are rendered by the shell top bar so they
+   *  sit beside Branches/System; the workspace only consumes the state. */
+  layoutPreset: PaneLayoutPreset;
+  isBroadcastActive: boolean;
+  onBroadcastActiveChange: (active: boolean) => void;
   soundEnabled: boolean;
   onSoundToggle: () => void;
   playDoneSound: () => void;
@@ -64,7 +69,8 @@ function paneTitle(pane: WorkspaceRuntimePane, index: number, unsaved: string): 
 
 export function SessionWorkspace({
   panes, focusedPaneId, runningSessionIds, isMobile, maxPanes, modelsRefreshKey, activeCwd,
-  focusedChatInputRef, soundEnabled, onSoundToggle, playDoneSound, unlockAudio,
+  focusedChatInputRef, layoutPreset, isBroadcastActive, onBroadcastActiveChange,
+  soundEnabled, onSoundToggle, playDoneSound, unlockAudio,
   onFocusPane, onAddPane, onClosePane, onSwapPanes, onSelectSessionForPane, onSelectSessionIdForPane, onSetPaneLabel,
   onPaneCwdChange, onPaneAgentEnd, onPaneAttentionNeeded,
   onPaneSessionCreated, onPaneSessionForked, onFocusedBranchDataChange,
@@ -79,20 +85,6 @@ export function SessionWorkspace({
     if (typeof window === "undefined") return null;
     return localStorage.getItem("pi-web:pane-maximized-id") || null;
   });
-  const [layoutPreset, setLayoutPresetState] = useState<PaneLayoutPreset>(() => {
-    if (typeof window === "undefined") return "auto";
-    const saved = localStorage.getItem("pi-web:pane-layout-preset");
-    const valid: PaneLayoutPreset[] = ["auto", "1x1", "1+2", "2x1", "2x2"];
-    return valid.includes(saved as PaneLayoutPreset) ? (saved as PaneLayoutPreset) : "auto";
-  });
-  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("pi-web:pane-layout-preset", layoutPreset);
-    } catch {}
-  }, [layoutPreset]);
-
   useEffect(() => {
     try {
       if (maximizedPaneId) localStorage.setItem("pi-web:pane-maximized-id", maximizedPaneId);
@@ -100,7 +92,6 @@ export function SessionWorkspace({
     } catch {}
   }, [maximizedPaneId]);
 
-  const [isBroadcastActive, setIsBroadcastActive] = useState(false);
   const [broadcastText, setBroadcastText] = useState("");
   const [broadcastTargetIds, setBroadcastTargetIds] = useState<Set<string>>(() => new Set(panes.map((p) => p.id)));
 
@@ -300,6 +291,15 @@ export function SessionWorkspace({
           >
             {t("panes.broadcastSend", { count: broadcastTargetIds.size })}
           </button>
+          <button
+            type="button"
+            className="workspace-tool-btn"
+            onClick={() => onBroadcastActiveChange(false)}
+            title={t("sidebar.cancel")}
+            aria-label={t("sidebar.cancel")}
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -422,75 +422,6 @@ export function SessionWorkspace({
           title={panes.length >= maxPanes ? t("panes.maximum") : t("panes.addPane")}
           aria-label={panes.length >= maxPanes ? t("panes.maximum") : t("panes.addPane")}
         >+</button>
-
-        {/* Workspace Toolbar Controls: Layout Switcher & Broadcast Toggle */}
-        <div className="workspace-controls-group">
-          <div style={{ position: "relative" }}>
-            <button
-              type="button"
-              className={`workspace-tool-btn${layoutPreset !== "auto" ? " is-active" : ""}`}
-              onClick={() => setLayoutMenuOpen((v) => !v)}
-              title={t("panes.layout")}
-            >
-              📐 {t("panes.layout")}: {layoutPreset.toUpperCase()} ▾
-            </button>
-            {layoutMenuOpen && (
-              <div
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "100%",
-                  marginTop: 4,
-                  zIndex: 100,
-                  background: "var(--bg-panel)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                  display: "flex",
-                  flexDirection: "column",
-                  minWidth: 140,
-                  padding: 4,
-                }}
-              >
-                {(["auto", "1x1", "1+2", "2x1", "2x2"] as PaneLayoutPreset[]).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    style={{
-                      padding: "6px 10px",
-                      fontSize: 11,
-                      textAlign: "left",
-                      border: 0,
-                      background: layoutPreset === p ? "var(--bg-selected)" : "transparent",
-                      color: layoutPreset === p ? "var(--accent)" : "var(--text)",
-                      cursor: "pointer",
-                      borderRadius: 4,
-                    }}
-                    onClick={() => {
-                      setLayoutPresetState(p);
-                      setLayoutMenuOpen(false);
-                    }}
-                  >
-                    {p === "auto" && t("panes.layoutAuto")}
-                    {p === "1x1" && t("panes.layout1x1")}
-                    {p === "1+2" && t("panes.layout1plus2")}
-                    {p === "2x1" && t("panes.layout2x1")}
-                    {p === "2x2" && t("panes.layout2x2")}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            className={`workspace-tool-btn${isBroadcastActive ? " is-active" : ""}`}
-            onClick={() => setIsBroadcastActive((v) => !v)}
-            title={t("panes.broadcastTitle")}
-          >
-            📢 {t("panes.broadcast")}
-          </button>
-        </div>
       </div>
 
       {/* Grid Workspace Panes */}
@@ -545,34 +476,41 @@ export function SessionWorkspace({
                 </div>
               )}
               {(pane.session || effectiveCwd) ? (
-                <ChatWindow
-                  key={`${pane.id}:${pane.revision}`}
-                  session={pane.session}
-                  sessionRunning={Boolean(pane.session && runningSessionIds.has(pane.session.id))}
-                  isFocused={focused}
-                  newSessionCwd={pane.session ? null : effectiveCwd}
-                  newSessionDraftKey={draftKey}
-                  onNewSessionCwdChange={(newCwd) => onPaneCwdChange?.(pane.id, newCwd)}
-                  onAgentEnd={() => onPaneAgentEnd(pane.id)}
-                  onAttentionNeeded={(request) => onPaneAttentionNeeded(pane.id, request)}
-                  onSessionCreated={(session, sourceDraftKey) => onPaneSessionCreated(pane.id, pane.revision, session, sourceDraftKey)}
-                  onSessionForked={(newSessionId) => {
-                    if (pane.session) onPaneSessionForked(pane.id, pane.revision, pane.session.id, newSessionId);
-                  }}
-                  modelsRefreshKey={modelsRefreshKey}
-                  chatInputRef={inputRef}
-                  onBranchDataChange={focused ? onFocusedBranchDataChange : undefined}
-                  onSystemPromptChange={focused ? onFocusedSystemPromptChange : undefined}
-                  onSystemPromptLoaderChange={focused ? onFocusedSystemPromptLoaderChange : undefined}
-                  onSessionStatsChange={focused ? onFocusedSessionStatsChange : undefined}
-                  onSessionStatsPanelOpen={focused ? onFocusedSessionStatsPanelOpen : undefined}
-                  onContextUsageChange={focused ? onFocusedContextUsageChange : undefined}
-                  onOpenFile={focused ? onFocusedOpenFile : undefined}
-                  soundEnabled={soundEnabled}
-                  onSoundToggle={onSoundToggle}
-                  playDoneSound={playDoneSound}
-                  unlockAudio={unlockAudio}
-                />
+                <div
+                  // Session identity intentionally owns this key: changing
+                  // conversations remounts the content (as ChatWindow already
+                  // required) and replays one short, GPU-friendly entrance.
+                  key={`${pane.id}:${pane.session?.id ?? draftKey ?? "new"}:${pane.revision}`}
+                  className="session-pane-content"
+                >
+                  <ChatWindow
+                    session={pane.session}
+                    sessionRunning={Boolean(pane.session && runningSessionIds.has(pane.session.id))}
+                    isFocused={focused}
+                    newSessionCwd={pane.session ? null : effectiveCwd}
+                    newSessionDraftKey={draftKey}
+                    onNewSessionCwdChange={(newCwd) => onPaneCwdChange?.(pane.id, newCwd)}
+                    onAgentEnd={() => onPaneAgentEnd(pane.id)}
+                    onAttentionNeeded={(request) => onPaneAttentionNeeded(pane.id, request)}
+                    onSessionCreated={(session, sourceDraftKey) => onPaneSessionCreated(pane.id, pane.revision, session, sourceDraftKey)}
+                    onSessionForked={(newSessionId) => {
+                      if (pane.session) onPaneSessionForked(pane.id, pane.revision, pane.session.id, newSessionId);
+                    }}
+                    modelsRefreshKey={modelsRefreshKey}
+                    chatInputRef={inputRef}
+                    onBranchDataChange={focused ? onFocusedBranchDataChange : undefined}
+                    onSystemPromptChange={focused ? onFocusedSystemPromptChange : undefined}
+                    onSystemPromptLoaderChange={focused ? onFocusedSystemPromptLoaderChange : undefined}
+                    onSessionStatsChange={focused ? onFocusedSessionStatsChange : undefined}
+                    onSessionStatsPanelOpen={focused ? onFocusedSessionStatsPanelOpen : undefined}
+                    onContextUsageChange={focused ? onFocusedContextUsageChange : undefined}
+                    onOpenFile={focused ? onFocusedOpenFile : undefined}
+                    soundEnabled={soundEnabled}
+                    onSoundToggle={onSoundToggle}
+                    playDoneSound={playDoneSound}
+                    unlockAudio={unlockAudio}
+                  />
+                </div>
               ) : focused ? children : null}
             </section>
           );

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, type KeyboardEvent } from "react";
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, type KeyboardEvent, type ReactNode } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
@@ -80,6 +80,10 @@ interface Props {
   draftKey?: string;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
+  /** Rendered next to the model selector. Used by the empty-new-session screen
+   *  to place its working-directory picker inline instead of in a separate
+   *  block above the composer, so both controls stay visually aligned. */
+  leadingControl?: ReactNode;
 }
 
 export interface ChatInputHandle {
@@ -394,6 +398,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onPromptWithStreamingBehavior,
   draftKey,
   cwd,
+  leadingControl,
 }: Props, ref) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -2051,6 +2056,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
           {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
           <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
+            {leadingControl}
             <button
               onClick={() => fileInputRef.current?.click()}
              title={t("chat.attachImage")}
